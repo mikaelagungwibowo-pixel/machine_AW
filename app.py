@@ -6,13 +6,14 @@ import pandas as pd
 import streamlit as st
 import seaborn as sns
 import matplotlib.pyplot as plt
-import sklearn  # untuk menampilkan versi di sidebar
+import sklearn  # tampilkan versi di sidebar
 
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support, confusion_matrix,
-    roc_auc_score, roc_curve, precision_recall_curve, classification_report
+    roc_auc_score, roc_curve, precision_recall_curve, classification_report,
+    f1_score, make_scorer,  # ✅ scorer F1 kustom dengan pos_label
 )
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
@@ -26,7 +27,7 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 # =========================================================
-# KONFIGURASI SKEMA TERKUNCI (SESUAI PERMINTAAN)
+# KONFIGURASI SKEMA TERKUNCI
 # =========================================================
 CANON_FEATURES = [
     "USIAMASUK",
@@ -45,8 +46,6 @@ st.set_page_config(
     layout="wide",
     page_icon="🎓"
 )
-
-# Tampilkan versi scikit-learn di sidebar untuk diagnosa
 st.sidebar.caption(f"scikit-learn version: {sklearn.__version__}")
 
 # =========================================================
@@ -64,13 +63,11 @@ NAME_MAP = {
     "usiamasukth": "USIAMASUK",
     "usia": "USIAMASUK",
     "usia masuk": "USIAMASUK",
-
     # IP series
     "ip2": "IP2", "ipk2": "IP2", "ips2": "IP2",
     "ip3": "IP3", "ipk3": "IP3", "ips3": "IP3",
     "ip5": "IP5", "ipk5": "IP5", "ips5": "IP5",
-
-    # RERATA NILAI → rata-rata nilai
+    # Rata-rata nilai
     "reratanilai": "rata-rata nilai",
     "rataratanilai": "rata-rata nilai",
     "rata2nilai": "rata-rata nilai",
@@ -78,18 +75,15 @@ NAME_MAP = {
     "avgscore": "rata-rata nilai",
     "nilaiavg": "rata-rata nilai",
     "nilai_rerata": "rata-rata nilai",
-
-    # JALUR → mandiri/flagsip
+    # Jalur
     "jalur": "mandiri/flagsip",
     "mandiri/flagsip": "mandiri/flagsip",
     "mandiriflagsip": "mandiri/flagsip",
     "mandiriflagship": "mandiri/flagsip",
-
-    # BEKERJA → BEKERJA/TIDAK
+    # Bekerja
     "bekerja": "BEKERJA/TIDAK",
     "bekerja/tidak": "BEKERJA/TIDAK",
     "statusbekerja": "BEKERJA/TIDAK",
-
     # Target
     "lulustepat": "LULUS TEPAT/TIDAK",
     "lulustepattidak": "LULUS TEPAT/TIDAK",
@@ -115,26 +109,21 @@ def harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
             if pd.isna(v):
                 return v
             s = str(v).strip().upper()
-            # Koreksi FLAGSHIP → FLAGSIP (sesuai ejaan permintaan)
             if s == "FLAGSHIP":
-                s = "FLAGSIP"
-            # Hanya izinkan dua nilai: MANDIRI / FLAGSIP (nilai lain tetap diproses via one-hot)
+                s = "FLAGSIP"  # ejaan yang dipakai di skema
             return s
         df["mandiri/flagsip"] = df["mandiri/flagsip"].apply(norm_jalur)
 
     if "BEKERJA/TIDAK" in df.columns:
         def norm_bin_work(v):
-            if pd.isna(v):
-                return v
+            if pd.isna(v): return v
             s = str(v).strip().lower()
-            if s in {"1", "ya", "y", "true", "bekerja"}:
-                return "YA"
-            if s in {"0", "tidak", "tdk", "t", "false", "tidak bekerja"}:
-                return "TIDAK"
+            if s in {"1", "ya", "y", "true", "bekerja"}: return "YA"
+            if s in {"0", "tidak", "tdk", "t", "false", "tidak bekerja"}: return "TIDAK"
             return str(v).upper()
         df["BEKERJA/TIDAK"] = df["BEKERJA/TIDAK"].apply(norm_bin_work)
 
-    # 3) Pastikan kolom numerik benar-benar numerik
+    # 3) Pastikan numerik benar-benar numerik
     for col in ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -152,14 +141,11 @@ def build_pipeline(model_name: str, numeric_features, categorical_features, para
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler())
     ])
-
-    # ✅ OneHotEncoder kompatibel lintas versi (1.0 .. 1.5+)
+    # ✅ OneHotEncoder kompatibel lintas versi
     try:
-        # scikit-learn >= 1.2: gunakan sparse_output
-        ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+        ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)  # sklearn >=1.2
     except TypeError:
-        # scikit-learn < 1.2: fallback ke sparse
-        ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)
+        ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)        # sklearn <1.2
 
     categorical_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
@@ -277,7 +263,7 @@ st.sidebar.caption("💾 Muat model .joblib (opsional)")
 uploaded_model = st.sidebar.file_uploader("Muat Model (.joblib)", type=["joblib"], accept_multiple_files=False)
 
 # =========================================================
-# STATE DATAFRAME (CACHE SEDERHANA)
+# CACHE SEDERHANA: DATAFRAME
 # =========================================================
 df_cached = st.session_state.get("df_cached", None)
 
@@ -318,13 +304,13 @@ with tab_data:
             st.error(f"Gagal memuat file: {e}")
             df = None
     else:
-        df = df_cached  # gunakan cache bila ada
+        df = df_cached
         if df is None:
             st.info("Belum ada file diunggah. Anda bisa mengunduh Template Excel di bawah.")
 
     if df is not None:
         df = harmonize_columns(df)
-        st.session_state["df_cached"] = df  # simpan ke cache
+        st.session_state["df_cached"] = df
         st.markdown("**Data (20 baris pertama):**")
         st.dataframe(df.head(20), use_container_width=True)
 
@@ -443,7 +429,7 @@ with tab_train:
                     else:
                         st.info("ROC/PR tidak tersedia (model tidak menyediakan probabilitas atau target tidak biner).")
 
-                    # Feature importance
+                    # Pentingnya Fitur
                     st.markdown("**Pentingnya Fitur**")
                     try:
                         model = pipe.named_steps["model"]
@@ -453,8 +439,14 @@ with tab_train:
                         if hasattr(model, "feature_importances_"):
                             importances = model.feature_importances_
                         else:
+                            # ✅ Gunakan F1 scorer dengan pos_label=positive_value
+                            scorer = make_scorer(f1_score, pos_label=positive_value, zero_division=0)
                             result = permutation_importance(
-                                pipe, X_test, y_test, n_repeats=5, random_state=random_state, n_jobs=-1, scoring="f1"
+                                pipe, X_test, y_test,
+                                n_repeats=5,
+                                random_state=random_state,
+                                n_jobs=-1,
+                                scoring=scorer
                             )
                             importances = result.importances_mean
 
@@ -467,7 +459,7 @@ with tab_train:
                     except Exception as e:
                         st.warning(f"Gagal menghitung importance: {e}")
 
-                    # Simpan model ke file unduhan & session_state
+                    # Simpan model
                     st.markdown("**💾 Simpan Model**")
                     buf = io.BytesIO()
                     joblib.dump({"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}, buf)
@@ -538,7 +530,6 @@ with tab_form:
                 "BEKERJA/TIDAK": bekerja,
             }
 
-            # Susun sesuai fitur yang diharapkan model
             X_one = {c: (inputs_form[c] if c in inputs_form else np.nan) for c in expected_features}
             X_one = pd.DataFrame([X_one])
 
