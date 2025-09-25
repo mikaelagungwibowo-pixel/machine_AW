@@ -7,7 +7,6 @@ import streamlit as st
 import seaborn as sns
 import matplotlib.pyplot as plt
 import sklearn  # tampilkan versi di sidebar
-
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
@@ -19,11 +18,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.inspection import permutation_importance
-
 from sklearn.naive_bayes import GaussianNB
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
-
 import joblib
 
 # =========================================================
@@ -116,10 +113,13 @@ def harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     if "BEKERJA/TIDAK" in df.columns:
         def norm_bin_work(v):
-            if pd.isna(v): return v
+            if pd.isna(v):
+                return v
             s = str(v).strip().lower()
-            if s in {"1", "ya", "y", "true", "bekerja"}: return "YA"
-            if s in {"0", "tidak", "tdk", "t", "false", "tidak bekerja"}: return "TIDAK"
+            if s in {"1", "ya", "y", "true", "bekerja"}:
+                return "YA"
+            if s in {"0", "tidak", "tdk", "t", "false", "tidak bekerja"}:
+                return "TIDAK"
             return str(v).upper()
         df["BEKERJA/TIDAK"] = df["BEKERJA/TIDAK"].apply(norm_bin_work)
 
@@ -127,8 +127,8 @@ def harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col in ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-
     return df
+
 
 def smart_detect_target(df: pd.DataFrame, target_guess: str = TARGET_NAME):
     if TARGET_NAME in df.columns:
@@ -136,16 +136,18 @@ def smart_detect_target(df: pd.DataFrame, target_guess: str = TARGET_NAME):
     candidates = [c for c in df.columns if _norm(c) in {"lulustepattidak", "lulus_tepat", "lulus", "statuslulus"}]
     return candidates[0] if candidates else df.columns[-1]
 
+
 def build_pipeline(model_name: str, numeric_features, categorical_features, params: dict):
     numeric_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler())
     ])
+
     # ✅ OneHotEncoder kompatibel lintas versi
     try:
         ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)  # sklearn >=1.2
     except TypeError:
-        ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)        # sklearn <1.2
+        ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)  # sklearn <1.2
 
     categorical_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
@@ -183,6 +185,7 @@ def build_pipeline(model_name: str, numeric_features, categorical_features, para
 
     return Pipeline(steps=[("preprocess", preprocessor), ("model", model)])
 
+
 def plot_confusion_matrix(cm, labels):
     fig, ax = plt.subplots(figsize=(4, 3))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False,
@@ -190,6 +193,7 @@ def plot_confusion_matrix(cm, labels):
     ax.set_xlabel("Prediksi")
     ax.set_ylabel("Aktual")
     st.pyplot(fig)
+
 
 def plot_roc_pr(y_true_bin, y_score):
     fpr, tpr, _ = roc_curve(y_true_bin, y_score)
@@ -211,6 +215,7 @@ def plot_roc_pr(y_true_bin, y_score):
     ax2.set_title("Precision-Recall Curve")
     st.pyplot(fig2)
 
+
 def get_feature_names_from_ct(ct: ColumnTransformer):
     output_features = []
     for name, transformer, cols in ct.transformers_:
@@ -230,6 +235,7 @@ def get_feature_names_from_ct(ct: ColumnTransformer):
             output_features.extend(cols if isinstance(cols, list) else [cols])
     return output_features
 
+
 def to_binary(y_series: pd.Series, positive_value):
     return (y_series == positive_value).astype(int)
 
@@ -238,23 +244,28 @@ def to_binary(y_series: pd.Series, positive_value):
 # =========================================================
 st.sidebar.title("⚙️ Pengaturan")
 st.sidebar.caption("Model & parameter pelatihan")
-
 model_name = st.sidebar.selectbox(
     "Pilih Model", ["Random Forest", "Decision Tree", "Naive Bayes (GaussianNB)"], index=0
 )
 test_size = st.sidebar.slider("Porsi Test Set", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
 random_state = st.sidebar.number_input("Random State", value=42, step=1)
-
 params = {"random_state": random_state}
 if model_name == "Random Forest":
     params["n_estimators"] = st.sidebar.slider("n_estimators", 100, 1000, 300, 50)
     params["max_depth"] = st.sidebar.select_slider("max_depth", options=[None, 5, 10, 15, 20, 30, 50], value=None)
     params["min_samples_split"] = st.sidebar.slider("min_samples_split", 2, 20, 2, 1)
-    params["balanced"] = st.sidebar.toggle("class_weight='balanced'", value=True)
+    # st.toggle ada di Streamlit baru; fallback ke checkbox jika tidak ada
+    try:
+        params["balanced"] = st.sidebar.toggle("class_weight='balanced'", value=True)
+    except AttributeError:
+        params["balanced"] = st.sidebar.checkbox("class_weight='balanced'", value=True)
 elif model_name == "Decision Tree":
     params["max_depth"] = st.sidebar.select_slider("max_depth", options=[None, 3, 5, 10, 15, 20, 30], value=None)
     params["min_samples_split"] = st.sidebar.slider("min_samples_split", 2, 20, 2, 1)
-    params["balanced"] = st.sidebar.toggle("class_weight='balanced'", value=True)
+    try:
+        params["balanced"] = st.sidebar.toggle("class_weight='balanced'", value=True)
+    except AttributeError:
+        params["balanced"] = st.sidebar.checkbox("class_weight='balanced'", value=True)
 elif model_name == "Naive Bayes (GaussianNB)":
     params["var_smoothing"] = 10 ** st.sidebar.slider("log10(var_smoothing)", -12, -6, -9)
 
@@ -272,7 +283,7 @@ df_cached = st.session_state.get("df_cached", None)
 # =========================================================
 st.title("🎓 Prediksi Kelulusan Tepat Waktu — Skema Fitur Terkunci")
 st.markdown("""
-Fitur dipakai: **USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK**  
+Fitur dipakai: **USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK**
 Target (label): **LULUS TEPAT/TIDAK**
 """)
 
@@ -286,7 +297,6 @@ tab_data, tab_train, tab_form, tab_about = st.tabs(
 with tab_data:
     st.subheader("1) Unggah Data (CSV/XLSX/XLS)")
     uploaded_file = st.file_uploader("Pilih file data", type=["csv", "xlsx", "xls"])
-
     df = None
     if uploaded_file is not None:
         name = uploaded_file.name.lower()
@@ -305,8 +315,9 @@ with tab_data:
             df = None
     else:
         df = df_cached
-        if df is None:
-            st.info("Belum ada file diunggah. Anda bisa mengunduh Template Excel di bawah.")
+
+    if df is None:
+        st.info("Belum ada file diunggah. Anda bisa mengunduh Template Excel di bawah.")
 
     if df is not None:
         df = harmonize_columns(df)
@@ -322,31 +333,41 @@ with tab_data:
             if missing:
                 st.warning(f"Kolom belum ada: {missing} — pelatihan tetap bisa dengan fitur yang tersedia (target tetap wajib).")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Tipe Data**")
-            st.write(df.dtypes)
-        with col2:
-            st.markdown("**Missing Value per Kolom**")
-            st.write(df.isna().sum())
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Tipe Data**")
+                st.write(df.dtypes)
+            with col2:
+                st.markdown("**Missing Value per Kolom**")
+                st.write(df.isna().sum())
 
-    st.divider()
-    # Template Excel
-    st.markdown("**⬇️ Unduh Template Excel (header sesuai skema)**")
-    sample_rows = [
-        {"USIAMASUK": 18, "IP2": 3.2, "IP3": 3.3, "IP5": 3.4, "rata-rata nilai": 82, "mandiri/flagsip": "MANDIRI", "BEKERJA/TIDAK": "TIDAK", "LULUS TEPAT/TIDAK": "TEPAT"},
-        {"USIAMASUK": 19, "IP2": 3.0, "IP3": 3.0, "IP5": 2.9, "rata-rata nilai": 75, "mandiri/flagsip": "FLAGSIP", "BEKERJA/TIDAK": "YA", "LULUS TEPAT/TIDAK": "TIDAK"},
-    ]
-    tpl_df = pd.DataFrame(sample_rows)
-    excel_buf = BytesIO()
-    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
-        tpl_df.to_excel(writer, index=False, sheet_name="DATA")
-    st.download_button(
-        "Unduh Template Excel (sample_data_skematerkunci.xlsx)",
-        data=excel_buf.getvalue(),
-        file_name="sample_data_skematerkunci.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        st.divider()
+        # Template Excel
+        st.markdown("**⬇️ Unduh Template Excel (header sesuai skema)**")
+        sample_rows = [
+            {"USIAMASUK": 18, "IP2": 3.2, "IP3": 3.3, "IP5": 3.4, "rata-rata nilai": 82, "mandiri/flagsip": "MANDIRI", "BEKERJA/TIDAK": "TIDAK", "LULUS TEPAT/TIDAK": "TEPAT"},
+            {"USIAMASUK": 19, "IP2": 3.0, "IP3": 3.0, "IP5": 2.9, "rata-rata nilai": 75, "mandiri/flagsip": "FLAGSIP", "BEKERJA/TIDAK": "YA", "LULUS TEPAT/TIDAK": "TIDAK"},
+        ]
+        tpl_df = pd.DataFrame(sample_rows)
+        excel_buf = BytesIO()
+        try:
+            with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
+                tpl_df.to_excel(writer, index=False, sheet_name="DATA")
+            st.download_button(
+                "Unduh Template Excel (sample_data_skematerkunci.xlsx)",
+                data=excel_buf.getvalue(),
+                file_name="sample_data_skematerkunci.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        except Exception:
+            # Fallback: provide CSV jika openpyxl tidak tersedia
+            csv_bytes = tpl_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Unduh Template CSV (sample_data_skematerkunci.csv)",
+                data=csv_bytes,
+                file_name="sample_data_skematerkunci.csv",
+                mime="text/csv"
+            )
 
 # -----------------------------
 # Tab Train
@@ -370,9 +391,11 @@ with tab_train:
                 categorical_features = [c for c in ["mandiri/flagsip", "BEKERJA/TIDAK"] if c in locked_features]
 
                 unique_target_vals = sorted(df[target_col].dropna().unique().tolist(), key=lambda x: str(x))
-                default_positive = ("TEPAT" if "TEPAT" in unique_target_vals
-                                    else ("YA" if "YA" in unique_target_vals
-                                          else (1 if 1 in unique_target_vals else unique_target_vals[0])))
+                default_positive = (
+                    "TEPAT" if "TEPAT" in unique_target_vals
+                    else ("YA" if "YA" in unique_target_vals
+                          else (1 if 1 in unique_target_vals else unique_target_vals[0]))
+                )
                 positive_value = st.selectbox(
                     "Nilai target yang dianggap **positif** (Kelulusan Tepat Waktu)",
                     options=unique_target_vals,
@@ -410,8 +433,13 @@ with tab_train:
                     prec, rec, f1, _ = precision_recall_fscore_support(
                         y_test, y_pred, average="binary", pos_label=positive_value, zero_division=0
                     )
+                    st.success(
+                        f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}**  "
+                        f"Precision: **{prec:.3f}**  "
+                        f"Recall: **{rec:.3f}**  "
+                        f"F1: **{f1:.3f}**"
+                    )
 
-                    st.success(f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}** | Precision: **{prec:.3f}** | Recall: **{rec:.3f}** | F1: **{f1:.3f}**")
                     st.text("Classification Report:")
                     st.code(classification_report(y_test, y_pred, zero_division=0))
 
@@ -419,7 +447,9 @@ with tab_train:
                     cm = confusion_matrix(y_test, y_pred, labels=labels_for_cm[:2] if len(labels_for_cm) >= 2 else labels_for_cm)
                     st.markdown("**Confusion Matrix**")
                     try:
-                        plot_confusion_matrix(cm, labels=[str(positive_value), "NEGATIF"])
+                        # Sesuaikan label dengan bentuk matriks
+                        plot_labels = labels_for_cm[:2] if cm.shape == (2, 2) else labels_for_cm[: cm.shape[0]]
+                        plot_confusion_matrix(cm, labels=[str(l) for l in plot_labels])
                     except Exception:
                         st.write(cm)
 
@@ -435,7 +465,6 @@ with tab_train:
                         model = pipe.named_steps["model"]
                         pre = pipe.named_steps["preprocess"]
                         feature_names = get_feature_names_from_ct(pre)
-
                         if hasattr(model, "feature_importances_"):
                             importances = model.feature_importances_
                         else:
@@ -449,7 +478,6 @@ with tab_train:
                                 scoring=scorer
                             )
                             importances = result.importances_mean
-
                         imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
                         imp_df = imp_df.sort_values("importance", ascending=False).head(20)
                         fig, ax = plt.subplots(figsize=(6, 5))
@@ -463,6 +491,7 @@ with tab_train:
                     st.markdown("**💾 Simpan Model**")
                     buf = io.BytesIO()
                     joblib.dump({"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}, buf)
+                    buf.seek(0)
                     st.download_button(
                         "Unduh Model (.joblib)",
                         data=buf.getvalue(),
@@ -482,7 +511,6 @@ with tab_train:
 # -----------------------------
 with tab_form:
     st.subheader("3) Prediksi Individu — Form 7 Fitur")
-
     active_model_obj = st.session_state.get("last_trained_model", None)
     if uploaded_model is not None:
         try:
@@ -503,15 +531,12 @@ with tab_form:
 
         with st.form("form7"):
             colA, colB, colC = st.columns(3)
-
             with colA:
                 USIAMASUK = st.number_input("USIAMASUK (tahun)", min_value=15, max_value=60, value=19, step=1)
                 IP2 = st.number_input("IP2", min_value=0.0, max_value=4.0, value=3.2, step=0.01, format="%.2f")
-
             with colB:
                 IP3 = st.number_input("IP3", min_value=0.0, max_value=4.0, value=3.2, step=0.01, format="%.2f")
                 IP5 = st.number_input("IP5", min_value=0.0, max_value=4.0, value=3.2, step=0.01, format="%.2f")
-
             with colC:
                 rata_rata = st.slider("rata-rata nilai", min_value=0, max_value=100, value=82, step=1)
                 jalur = st.selectbox("mandiri/flagsip", opsi_jalur)
@@ -529,10 +554,8 @@ with tab_form:
                 "mandiri/flagsip": jalur,
                 "BEKERJA/TIDAK": bekerja,
             }
-
             X_one = {c: (inputs_form[c] if c in inputs_form else np.nan) for c in expected_features}
             X_one = pd.DataFrame([X_one])
-
             try:
                 pred = pipe.predict(X_one)[0]
                 proba_str = ""
@@ -543,41 +566,41 @@ with tab_form:
                     p_pos = float(proba[:, pos_index][0])
                     proba_str = f" — Prob(positif={positive_value}): **{p_pos:.3f}**"
                 st.success(f"**Hasil Prediksi (Form 7 Fitur)**: **{pred}**{proba_str}")
-                
+
                 if str(pred).upper() == str(positive_value).upper():
                     st.info(
-                "🎉 *Selamat! Prediksi Anda akan lulus tepat waktu.*\n\n"
-                "Tetap pertahankan kinerja Anda. Tips agar tetap di jalur:\n"
-                "- Pertahankan atau tingkatkan IP (Indeks Prestasi) tiap semester\n"
-                "- Jaga nilai rata-rata tetap tinggi\n"
-                "- Tetap fokus pada studi walaupun sambil bekerja\n"
-                "- Pilih jalur pendidikan yang sesuai kemampuan\n"
-                "- Konsultasi rutin dengan dosen pembimbing"
-            )
+                        "🎉 *Selamat! Prediksi Anda akan lulus tepat waktu.*\n\n"
+                        "Tetap pertahankan kinerja Anda. Tips agar tetap di jalur:\n"
+                        "- Pertahankan atau tingkatkan IP (Indeks Prestasi) tiap semester\n"
+                        "- Jaga nilai rata-rata tetap tinggi\n"
+                        "- Tetap fokus pada studi walaupun sambil bekerja\n"
+                        "- Pilih jalur pendidikan yang sesuai kemampuan\n"
+                        "- Konsultasi rutin dengan dosen pembimbing"
+                    )
                 else:
                     st.warning(
-                "⚠️ *Prediksi: Anda belum lulus tepat waktu.*\n\n"
-                "Beberapa hal yang dapat Anda tingkatkan agar peluang lulus tepat waktu lebih besar:\n"
-                "- Tingkatkan IP di semester berikutnya (IP2, IP3, IP5)\n"
-                "- Usahakan rata-rata nilai naik di semester berikutnya\n"
-                "- Pertimbangkan mengurangi aktivitas luar studi jika mengganggu akademik\n"
-                "- Konsultasikan strategi belajar dengan dosen pembimbing\n"
-                "- Pastikan memilih jalur pendidikan yang sesuai\n"
-                "Periksa kembali data input untuk memastikan akurasi."
-            )
-        # ==== OPTIONAL: tampilkan fitur paling berpengaruh jika model mendukung ====
-    try:
-        if hasattr(pipe.named_steps["model"], "feature_importances_"):
-                importances = pipe.named_steps["model"].feature_importances_
-                feature_names = get_feature_names_from_ct(pipe.named_steps["preprocess"])
-                sorted_idx = np.argsort(importances)[::-1]
-                st.markdown("*Fitur paling berpengaruh (global):*")
-                st.write({feature_names[i]: float(importances[i]) for i in sorted_idx[:3]})
-    except Exception:
-        pass
-            
-        except Exception as e:
-           st.error(f"Gagal prediksi: {e}")
+                        "⚠️ *Prediksi: Anda belum lulus tepat waktu.*\n\n"
+                        "Beberapa hal yang dapat Anda tingkatkan agar peluang lulus tepat waktu lebih besar:\n"
+                        "- Tingkatkan IP di semester berikutnya (IP2, IP3, IP5)\n"
+                        "- Usahakan rata-rata nilai naik di semester berikutnya\n"
+                        "- Pertimbangkan mengurangi aktivitas luar studi jika mengganggu akademik\n"
+                        "- Konsultasikan strategi belajar dengan dosen pembimbing\n"
+                        "- Pastikan memilih jalur pendidikan yang sesuai\n"
+                        "Periksa kembali data input untuk memastikan akurasi."
+                    )
+
+                # ==== OPTIONAL: tampilkan fitur paling berpengaruh jika model mendukung ====
+                try:
+                    if hasattr(pipe.named_steps["model"], "feature_importances_"):
+                        importances = pipe.named_steps["model"].feature_importances_
+                        feature_names = get_feature_names_from_ct(pipe.named_steps["preprocess"])
+                        sorted_idx = np.argsort(importances)[::-1]
+                        st.markdown("*Fitur paling berpengaruh (global):*")
+                        st.write({feature_names[i]: float(importances[i]) for i in sorted_idx[:3]})
+                except Exception:
+                    pass
+            except Exception as e:
+                st.error(f"Gagal prediksi: {e}")
 
 # -----------------------------
 # Tab About
@@ -585,22 +608,10 @@ with tab_form:
 with tab_about:
     st.subheader("Tentang Aplikasi (Skema Terkunci)")
     st.markdown(f"""
-- **Fitur digunakan**: {', '.join(CANON_FEATURES)}  
-- **Target**: {TARGET_NAME}  
+- **Fitur digunakan**: {', '.join(CANON_FEATURES)}
+- **Target**: {TARGET_NAME}
 - **Catatan**:
   - Aplikasi otomatis menyamakan nama kolom dari variasi umum ke format di atas.
   - Jika ada fitur yang tidak tersedia di dataset, pelatihan tetap bisa dilakukan dengan fitur yang ada.
   - Target harus biner — Anda dapat memilih kelas **positif** di UI (mis. `TEPAT`, `YA`, atau `1`).
-    """)
-
-
-
-
-
-
-
-
-
-
-
-
+""")
