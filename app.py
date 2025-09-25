@@ -545,7 +545,7 @@ with tab_form:
                 st.success(f"**Hasil Prediksi (Form 7 Fitur)**: **{pred}**{proba_str}")
                 
                 if str(pred).upper() == str(positive_value).upper():
-            st.info(
+                    st.info(
                 "🎉 *Selamat! Prediksi Anda akan lulus tepat waktu.*\n\n"
                 "Tetap pertahankan kinerja Anda. Tips agar tetap di jalur:\n"
                 "- Pertahankan atau tingkatkan IP (Indeks Prestasi) tiap semester\n"
@@ -591,5 +591,6 @@ with tab_about:
   - Jika ada fitur yang tidak tersedia di dataset, pelatihan tetap bisa dilakukan dengan fitur yang ada.
   - Target harus biner — Anda dapat memilih kelas **positif** di UI (mis. `TEPAT`, `YA`, atau `1`).
     """)
+
 
 
