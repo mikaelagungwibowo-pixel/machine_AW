@@ -543,6 +543,7 @@ with tab_form:
                     p_pos = float(proba[:, pos_index][0])
                     proba_str = f" — Prob(positif={positive_value}): **{p_pos:.3f}**"
                 st.success(f"**Hasil Prediksi (Form 7 Fitur)**: **{pred}**{proba_str}")
+                
                 if str(pred).upper() == str(positive_value).upper():
             st.info(
                 "🎉 *Selamat! Prediksi Anda akan lulus tepat waktu.*\n\n"
@@ -590,4 +591,5 @@ with tab_about:
   - Jika ada fitur yang tidak tersedia di dataset, pelatihan tetap bisa dilakukan dengan fitur yang ada.
   - Target harus biner — Anda dapat memilih kelas **positif** di UI (mis. `TEPAT`, `YA`, atau `1`).
     """)
+
 
