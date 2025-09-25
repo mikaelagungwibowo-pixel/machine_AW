@@ -543,6 +543,37 @@ with tab_form:
                     p_pos = float(proba[:, pos_index][0])
                     proba_str = f" — Prob(positif={positive_value}): **{p_pos:.3f}**"
                 st.success(f"**Hasil Prediksi (Form 7 Fitur)**: **{pred}**{proba_str}")
+                if str(pred).upper() == str(positive_value).upper():
+            st.info(
+                "🎉 *Selamat! Prediksi Anda akan lulus tepat waktu.*\n\n"
+                "Tetap pertahankan kinerja Anda. Tips agar tetap di jalur:\n"
+                "- Pertahankan atau tingkatkan IP (Indeks Prestasi) tiap semester\n"
+                "- Jaga nilai rata-rata tetap tinggi\n"
+                "- Tetap fokus pada studi walaupun sambil bekerja\n"
+                "- Pilih jalur pendidikan yang sesuai kemampuan\n"
+                "- Konsultasi rutin dengan dosen pembimbing"
+            )
+        else:
+            st.warning(
+                "⚠️ *Prediksi: Anda belum lulus tepat waktu.*\n\n"
+                "Beberapa hal yang dapat Anda tingkatkan agar peluang lulus tepat waktu lebih besar:\n"
+                "- Tingkatkan IP di semester berikutnya (IP2, IP3, IP5)\n"
+                "- Usahakan rata-rata nilai naik di semester berikutnya\n"
+                "- Pertimbangkan mengurangi aktivitas luar studi jika mengganggu akademik\n"
+                "- Konsultasikan strategi belajar dengan dosen pembimbing\n"
+                "- Pastikan memilih jalur pendidikan yang sesuai\n"
+                "Periksa kembali data input untuk memastikan akurasi."
+            )
+        # ==== OPTIONAL: tampilkan fitur paling berpengaruh jika model mendukung ====
+        try:
+            if hasattr(pipe.named_steps["model"], "feature_importances_"):
+                importances = pipe.named_steps["model"].feature_importances_
+                feature_names = get_feature_names_from_ct(pipe.named_steps["preprocess"])
+                sorted_idx = np.argsort(importances)[::-1]
+                st.markdown("*Fitur paling berpengaruh (global):*")
+                st.write({feature_names[i]: float(importances[i]) for i in sorted_idx[:3]})
+        except Exception:
+            pass
             except Exception as e:
                 st.error(f"Gagal prediksi: {e}")
 
@@ -559,3 +590,4 @@ with tab_about:
   - Jika ada fitur yang tidak tersedia di dataset, pelatihan tetap bisa dilakukan dengan fitur yang ada.
   - Target harus biner — Anda dapat memilih kelas **positif** di UI (mis. `TEPAT`, `YA`, atau `1`).
     """)
+
