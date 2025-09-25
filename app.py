@@ -554,7 +554,7 @@ with tab_form:
                 "- Pilih jalur pendidikan yang sesuai kemampuan\n"
                 "- Konsultasi rutin dengan dosen pembimbing"
             )
-                    else:
+                else:
             st.warning(
                 "⚠️ *Prediksi: Anda belum lulus tepat waktu.*\n\n"
                 "Beberapa hal yang dapat Anda tingkatkan agar peluang lulus tepat waktu lebih besar:\n"
@@ -591,6 +591,7 @@ with tab_about:
   - Jika ada fitur yang tidak tersedia di dataset, pelatihan tetap bisa dilakukan dengan fitur yang ada.
   - Target harus biner — Anda dapat memilih kelas **positif** di UI (mis. `TEPAT`, `YA`, atau `1`).
     """)
+
 
 
 
