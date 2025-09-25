@@ -575,8 +575,9 @@ with tab_form:
                 st.write({feature_names[i]: float(importances[i]) for i in sorted_idx[:3]})
         except Exception:
             pass
-            except Exception as e:
-                st.error(f"Gagal prediksi: {e}")
+            
+        except Exception as e:
+           st.error(f"Gagal prediksi: {e}")
 
 # -----------------------------
 # Tab About
@@ -591,6 +592,7 @@ with tab_about:
   - Jika ada fitur yang tidak tersedia di dataset, pelatihan tetap bisa dilakukan dengan fitur yang ada.
   - Target harus biner — Anda dapat memilih kelas **positif** di UI (mis. `TEPAT`, `YA`, atau `1`).
     """)
+
 
 
 
