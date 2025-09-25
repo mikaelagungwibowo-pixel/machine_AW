@@ -566,7 +566,7 @@ with tab_form:
                 "Periksa kembali data input untuk memastikan akurasi."
             )
         # ==== OPTIONAL: tampilkan fitur paling berpengaruh jika model mendukung ====
-        try:
+try:
             if hasattr(pipe.named_steps["model"], "feature_importances_"):
                 importances = pipe.named_steps["model"].feature_importances_
                 feature_names = get_feature_names_from_ct(pipe.named_steps["preprocess"])
@@ -592,6 +592,7 @@ with tab_about:
   - Jika ada fitur yang tidak tersedia di dataset, pelatihan tetap bisa dilakukan dengan fitur yang ada.
   - Target harus biner — Anda dapat memilih kelas **positif** di UI (mis. `TEPAT`, `YA`, atau `1`).
     """)
+
 
 
 
