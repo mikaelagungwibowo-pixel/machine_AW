@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split, cross_validate, Stratified
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, KBinsDiscretizer
 from sklearn.inspection import permutation_importance
-from sklearn.naive_bayes import GaussianNB, CategoricalNB
+from sklearn.naive_bayes import CategoricalNB
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 import joblib
@@ -255,7 +255,6 @@ with tab_data:
             df = None
     else:
         df = df_cached
-
     if df is not None:
         df = harmonize_columns(df)
         st.session_state["df_cached"] = df
@@ -292,8 +291,8 @@ with tab_train:
                 st.error("Tidak ada fitur terkunci yang ditemukan.")
             else:
                 st.success(f"Fitur dipakai: {locked_features}")
-                numeric_features = [c for c in CANON_FEATURES if df[c].dtype in ['int64', 'float64'] and c in locked_features]
-                categorical_features = [c for c in CANON_FEATURES if df[c].dtype == 'object' and c in locked_features]
+                numeric_features = [c for c in locked_features if df[c].dtype in ['int64', 'float64']]
+                categorical_features = [c for c in locked_features if df[c].dtype == 'object']
                 unique_target_vals = sorted(df[target_col].dropna().unique().tolist())
                 default_positive = "TEPAT" if "TEPAT" in unique_target_vals else unique_target_vals[0]
                 positive_value = st.selectbox("Nilai target positif", options=unique_target_vals, index=unique_target_vals.index(default_positive))
@@ -323,13 +322,13 @@ with tab_train:
                         st.success(f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}** Precision: **{prec:.3f}** Recall: **{rec:.3f}** F1: **{f1:.3f}**")
                         st.text("Classification Report:")
                         st.code(classification_report(y_test, y_pred, zero_division=0))
-                        # Visualizations for train/test split
                         y_test_bin = to_binary(y_test, positive_value)
                         cm = confusion_matrix(y_test, y_pred)
                         st.markdown("**Confusion Matrix**")
                         plot_confusion_matrix(cm, labels=pipe.classes_)
-                        if hasattr(pipe, "predict_proba"):
-                            y_score = pipe.predict_proba(X_test)[:, 1]
+                        if hasattr(pipe.named_steps["model"], "predict_proba"):
+                            pos_index = list(pipe.classes_).index(positive_value)
+                            y_score = pipe.predict_proba(X_test)[:, pos_index]
                             st.markdown("**ROC & PR Curve**")
                             plot_roc_pr(y_test_bin, y_score)
                     
@@ -366,12 +365,69 @@ with tab_train:
                     st.download_button("Unduh Model (.joblib)", data=buf.getvalue(), file_name=f"model.joblib", mime="application/octet-stream")
                     st.session_state["last_trained_model"] = {"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}
 
-# --- KODE UNTUK TAB LAIN DIKEMBALIKAN ---
+# --- KODE LENGKAP UNTUK TAB-TAB BERIKUTNYA ---
+REQUIRED_FEATURES = CANON_FEATURES
+FEATURE_PATTERNS = {
+    "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
+    "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
+    "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
+    "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
+    "rata-rata nilai": re.compile(r"(rata[- ]?rata\s*nilai|nilai\s*rata[- ]?rata|rerata)\s*[:=]?\s*(\d{1,3})", re.I),
+}
+
+def extract_features_from_text(text: str, current: dict) -> dict:
+    t = text.strip()
+    out = dict(current)
+    for key, pat in FEATURE_PATTERNS.items():
+        m = pat.search(t)
+        if m:
+            val = m.group(m.lastindex).replace(',', '.')
+            if key in {"rata-rata nilai", "USIAMASUK"}: out[key] = int(float(val))
+            else: out[key] = float(val)
+    if re.search(r"\bmandiri\b", t, re.I): out["mandiri/flagsip"] = "MANDIRI"
+    if re.search(r"\bflag(ship|sip)\b", t, re.I): out["mandiri/flagsip"] = "FLAGSIP"
+    if re.search(r"\b(tidak\s*(bekerja|kerja)|nggak\s*kerja)\b", t, re.I): out["BEKERJA/TIDAK"] = "TIDAK"
+    elif re.search(r"\b(bekerja|kerja)\b", t, re.I): out["BEKERJA/TIDAK"] = "YA"
+    return out
+
+def missing_features(feat: dict):
+    return [f for f in REQUIRED_FEATURES if feat.get(f) is None]
+
+def predict_and_recommend(pipe, features_dict: dict, positive_value: str):
+    one = pd.DataFrame([features_dict])
+    pred = pipe.predict(one)[0]
+    proba_str = ""
+    if hasattr(pipe.named_steps["model"], "predict_proba"):
+        proba = pipe.predict_proba(one)
+        pos_index = list(pipe.classes_).index(positive_value)
+        p_pos = proba[0, pos_index]
+        proba_str = f" (Probabilitas: {p_pos:.2f})"
+    
+    status_bekerja = str(features_dict.get("BEKERJA/TIDAK", "")).upper()
+    if pred == positive_value:
+        header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n🎉 *Selamat! Anda diprediksi lulus tepat waktu.*"
+        rekomendasi = ["- Pertahankan/tambah IP tiap semester", "- Jaga nilai rata-rata tetap tinggi"]
+        if status_bekerja == "YA": rekomendasi.append("- Tetap fokus meski sambil bekerja")
+        else: rekomendasi.append("- Manfaatkan waktu luang untuk kegiatan akademik")
+        rekomendasi.extend(["- Pilih jalur yang sesuai kemampuan", "- Konsultasi rutin dengan dosen pembimbing"])
+        return header + "\n" + "\n".join(rekomendasi)
+    else:
+        header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n⚠️ *Peluang lulus tepat waktu belum optimal.*"
+        rekomendasi = ["- Tingkatkan IP (IP2, IP3, IP5) berikutnya", "- Upayakan nilai rata-rata naik"]
+        if status_bekerja == "YA": rekomendasi.append("- Kurangi aktivitas yang mengganggu akademik")
+        else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
+        rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
+        return header + "\n" + "\n".join(rekomendasi)
+
+def init_chat_state():
+    if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
+    if "chat_features" not in st.session_state: st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES}
+
 with tab_form:
     st.subheader("3) Prediksi Individu — Form 7 Fitur")
-    active_model_obj = st.session_state.get("last_trained_model")
-    if not active_model_obj:
-        st.warning("Latih model di tab 'Pelatihan & Evaluasi' terlebih dahulu.")
+    active_model_obj = st.session_state.get("last_trained_model", None)
+    if active_model_obj is None:
+        st.warning("Latih model di tab 'Pelatihan & Evaluasi' atau muat file .joblib terlebih dahulu.")
     else:
         pipe = active_model_obj["pipeline"]
         positive_value = active_model_obj["positive"]
@@ -387,22 +443,50 @@ with tab_form:
                 rata_rata = st.slider("rata-rata nilai", 0, 100, 82)
                 jalur = st.selectbox("mandiri/flagsip", ["MANDIRI", "FLAGSIP"])
                 bekerja = st.selectbox("BEKERJA/TIDAK", ["YA", "TIDAK"])
-            
-            if st.form_submit_button("🔮 Prediksi"):
-                inputs_form = {"USIAMASUK": USIAMASUK, "IP2": IP2, "IP3": IP3, "IP5": IP5, "rata-rata nilai": rata_rata, "mandiri/flagsip": jalur, "BEKERJA/TIDAK": bekerja}
-                X_one = pd.DataFrame([inputs_form])
-                pred = pipe.predict(X_one)[0]
-                proba_str = ""
-                if hasattr(pipe, "predict_proba"):
-                    proba = pipe.predict_proba(X_one)
-                    pos_index = list(pipe.classes_).index(positive_value)
-                    p_pos = proba[0, pos_index]
-                    proba_str = f" — Probabilitas({positive_value}): **{p_pos:.3f}**"
-                st.success(f"**Hasil Prediksi:** **{pred}**{proba_str}")
+            submit = st.form_submit_button("🔮 Prediksi")
+
+        if submit:
+            inputs_form = {"USIAMASUK": USIAMASUK, "IP2": IP2, "IP3": IP3, "IP5": IP5, "rata-rata nilai": rata_rata, "mandiri/flagsip": jalur, "BEKERJA/TIDAK": bekerja}
+            X_one = pd.DataFrame([inputs_form])
+            pred = pipe.predict(X_one)[0]
+            proba_str = ""
+            if hasattr(pipe.named_steps["model"], "predict_proba"):
+                proba = pipe.predict_proba(X_one)
+                pos_index = list(pipe.classes_).index(positive_value)
+                p_pos = proba[0, pos_index]
+                proba_str = f" — Probabilitas({positive_value}): **{p_pos:.3f}**"
+            st.success(f"**Hasil Prediksi:** **{pred}**{proba_str}")
+            st.markdown(predict_and_recommend(pipe, inputs_form, positive_value).split("\n\n", 1)[1])
 
 with tab_chat:
-    st.subheader("4) Chatbot Akademik")
-    st.info("Fitur chatbot sedang dalam pengembangan.")
+    st.subheader("4) Chatbot Akademik — Tanya Jawab & Rekomendasi")
+    active_model_obj = st.session_state.get("last_trained_model")
+    if not active_model_obj:
+        st.warning("Latih model di tab 'Pelatihan & Evaluasi' atau muat file .joblib terlebih dahulu.")
+    else:
+        init_chat_state()
+        pipe = active_model_obj["pipeline"]
+        positive_value = active_model_obj["positive"]
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+        if prompt := st.chat_input("Masukkan data Anda..."):
+            st.session_state.chat_messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            st.session_state.chat_features = extract_features_from_text(prompt, st.session_state.chat_features)
+            missing = missing_features(st.session_state.chat_features)
+            
+            if not missing:
+                response = predict_and_recommend(pipe, st.session_state.chat_features, positive_value)
+                st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES} # Reset
+            else:
+                response = f"Data belum lengkap. Mohon lengkapi: {', '.join(missing)}"
+
+            with st.chat_message("assistant"):
+                st.markdown(response)
+            st.session_state.chat_messages.append({"role": "assistant", "content": response})
 
 with tab_about:
     st.subheader("Tentang Aplikasi (Skema Terkunci)")
