@@ -423,6 +423,16 @@ def init_chat_state():
     if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
     if "chat_features" not in st.session_state: st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES}
 
+# --- FUNGSI DIKEMBALIKAN ---
+def chat_system_prompt():
+    return (
+        "Saya adalah asisten akademik. Berbicaralah santai. "
+        "Saya dapat membantu prediksi kelulusan tepat waktu menggunakan 7 fitur: "
+        "USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK. "
+        "Ketik data Anda, misalnya: `usia=19 ip2=3.2 ip3=3.1 ip5=3.4 rerata=82 jalur=mandiri bekerja=tidak`. "
+        "Saya akan menanyakan yang belum lengkap. Ketik `reset` untuk mulai ulang."
+    )
+
 with tab_form:
     st.subheader("3) Prediksi Individu — Form 7 Fitur")
     active_model_obj = st.session_state.get("last_trained_model", None)
@@ -451,22 +461,30 @@ with tab_form:
             pred = pipe.predict(X_one)[0]
             proba_str = ""
             if hasattr(pipe.named_steps["model"], "predict_proba"):
-                proba = pipe.predict_proba(X_one)
-                pos_index = list(pipe.classes_).index(positive_value)
-                p_pos = proba[0, pos_index]
-                proba_str = f" — Probabilitas({positive_value}): **{p_pos:.3f}**"
+                try:
+                    proba = pipe.predict_proba(X_one)
+                    pos_index = list(pipe.classes_).index(positive_value)
+                    p_pos = proba[0, pos_index]
+                    proba_str = f" — Probabilitas({positive_value}): **{p_pos:.3f}**"
+                except Exception:
+                    proba_str = " (probabilitas tidak tersedia)"
             st.success(f"**Hasil Prediksi:** **{pred}**{proba_str}")
+            # Tampilkan rekomendasi dinamis
             st.markdown(predict_and_recommend(pipe, inputs_form, positive_value).split("\n\n", 1)[1])
 
 with tab_chat:
     st.subheader("4) Chatbot Akademik — Tanya Jawab & Rekomendasi")
-    active_model_obj = st.session_state.get("last_trained_model")
+    active_model_obj = st.session_state.get("last_trained_model", None)
     if not active_model_obj:
         st.warning("Latih model di tab 'Pelatihan & Evaluasi' atau muat file .joblib terlebih dahulu.")
     else:
         init_chat_state()
         pipe = active_model_obj["pipeline"]
         positive_value = active_model_obj["positive"]
+        
+        # --- PERBAIKAN: Menampilkan petunjuk chatbot ---
+        st.markdown("**Panduan Singkat**: " + chat_system_prompt())
+
         for msg in st.session_state.chat_messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
