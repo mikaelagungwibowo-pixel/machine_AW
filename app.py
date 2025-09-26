@@ -366,7 +366,6 @@ with tab_train:
                     st.session_state["last_trained_model"] = {"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}
 
 REQUIRED_FEATURES = CANON_FEATURES
-# --- PERUBAHAN: Regex untuk rata-rata nilai diubah untuk menerima desimal ---
 FEATURE_PATTERNS = {
     "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
     "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
@@ -382,7 +381,6 @@ def extract_features_from_text(text: str, current: dict) -> dict:
         m = pat.search(t)
         if m:
             val = m.group(m.lastindex).replace(',', '.')
-            # --- PERUBAHAN: rata-rata nilai sekarang diperlakukan sebagai float ---
             if key in {"USIAMASUK"}:
                 out[key] = int(float(val))
             else:
@@ -426,9 +424,7 @@ with tab_form:
                 IP3 = st.number_input("IP3", 0.0, 4.0, 3.2, 0.01, "%.2f")
                 IP5 = st.number_input("IP5", 0.0, 4.0, 3.2, 0.01, "%.2f")
             with colC:
-                # --- PERUBAHAN: Mengganti slider menjadi number_input untuk desimal ---
                 rata_rata = st.number_input("rata-rata nilai", min_value=0.0, max_value=16.0, value=13.0, step=0.01, format="%.2f", help="Hasil pembagian jumlah bobot nilai semester 5 dengan jumlah SKS pada semester 5.")
-            
             jalur = st.selectbox("mandiri/flagsip", ["MANDIRI", "FLAGSIP"])
             bekerja = st.selectbox("BEKERJA/TIDAK", ["YA", "TIDAK"])
             submit = st.form_submit_button("🔮 Prediksi")
@@ -460,7 +456,8 @@ with tab_form:
                 st.info(header + "\n" + "\n".join(rekomendasi))
             else:
                 header = "⚠️ *Peluang lulus tepat waktu belum optimal.*"
-                rekomendasi = ["- Tingkatkan IP (IP2, IP3, IP5) berikutnya", "- Upayakan nilai rata-rata naik"]
+                # --- PERUBAHAN TEKS REKOMENDASI ---
+                rekomendasi = ["- Tingkatkan IP berikutnya", "- Upayakan nilai rata-rata naik"]
                 if status_bekerja == "YA": rekomendasi.append("- Kurangi aktivitas yang mengganggu akademik")
                 else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
                 rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
@@ -513,7 +510,8 @@ with tab_chat:
                     response = header + "\n" + "\n".join(rekomendasi)
                 else:
                     header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n⚠️ *Peluang lulus tepat waktu belum optimal.*"
-                    rekomendasi = ["- Tingkatkan IP (IP2, IP3, IP5) berikutnya", "- Upayakan nilai rata-rata naik"]
+                    # --- PERUBAHAN TEKS REKOMENDASI ---
+                    rekomendasi = ["- Tingkatkan IP berikutnya", "- Upayakan nilai rata-rata naik"]
                     if status_bekerja == "YA": rekomendasi.append("- Kurangi aktivitas yang mengganggu akademik")
                     else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
                     rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
@@ -525,7 +523,6 @@ with tab_chat:
                 for m in missing:
                     if m == "USIAMASUK": ask_parts.append("USIAMASUK (angka, tahun)")
                     elif m in {"IP2", "IP3", "IP5"}: ask_parts.append(f"{m} (0.00 - 4.00)")
-                    # --- PERUBAHAN: Memperbarui petunjuk di chatbot ---
                     elif m == "rata-rata nilai": ask_parts.append("rata-rata nilai (0.00 - 16.00, dari total bobot nilai semester 5 dibagi SKS)")
                     elif m == "mandiri/flagsip": ask_parts.append("jalur: MANDIRI / FLAGSIP")
                     elif m == "BEKERJA/TIDAK": ask_parts.append("status kerja: YA / TIDAK")
