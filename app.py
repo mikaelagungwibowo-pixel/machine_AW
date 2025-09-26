@@ -392,35 +392,6 @@ def extract_features_from_text(text: str, current: dict) -> dict:
 def missing_features(feat: dict):
     return [f for f in REQUIRED_FEATURES if feat.get(f) is None]
 
-def predict_and_recommend(pipe, features_dict: dict, positive_value: str):
-    one = pd.DataFrame([features_dict])
-    pred = pipe.predict(one)[0]
-    proba_str = ""
-    if hasattr(pipe.named_steps["model"], "predict_proba"):
-        try:
-            proba = pipe.predict_proba(one)
-            pos_index = list(pipe.classes_).index(positive_value)
-            p_pos = proba[0, pos_index]
-            proba_str = f" (Probabilitas: {p_pos:.2f})"
-        except Exception:
-            proba_str = ""
-    
-    status_bekerja = str(features_dict.get("BEKERJA/TIDAK", "")).upper()
-    if pred == positive_value:
-        header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n🎉 *Selamat! Anda diprediksi lulus tepat waktu.*"
-        rekomendasi = ["- Pertahankan/tambah IP tiap semester", "- Jaga nilai rata-rata tetap tinggi"]
-        if status_bekerja == "YA": rekomendasi.append("- Tetap fokus meski sambil bekerja")
-        else: rekomendasi.append("- Manfaatkan waktu luang untuk kegiatan akademik")
-        rekomendasi.extend(["- Pilih jalur yang sesuai kemampuan", "- Konsultasi rutin dengan dosen pembimbing"])
-        return header + "\n" + "\n".join(rekomendasi)
-    else:
-        header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n⚠️ *Peluang lulus tepat waktu belum optimal.*"
-        rekomendasi = ["- Tingkatkan IP (IP2, IP3, IP5) berikutnya", "- Upayakan nilai rata-rata naik"]
-        if status_bekerja == "YA": rekomendasi.append("- Kurangi aktivitas yang mengganggu akademik")
-        else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
-        rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
-        return header + "\n" + "\n".join(rekomendasi)
-
 def init_chat_state():
     if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
     if "chat_features" not in st.session_state: st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES}
@@ -451,9 +422,7 @@ with tab_form:
                 IP3 = st.number_input("IP3", 0.0, 4.0, 3.2, 0.01, "%.2f")
                 IP5 = st.number_input("IP5", 0.0, 4.0, 3.2, 0.01, "%.2f")
             with colC:
-                # --- PERUBAHAN: Menambahkan tooltip (help) pada slider ---
                 rata_rata = st.slider("rata-rata nilai", 0, 100, 82, help="Hasil pembagian jumlah bobot nilai semester 5 dengan jumlah SKS pada semester 5.")
-            
             jalur = st.selectbox("mandiri/flagsip", ["MANDIRI", "FLAGSIP"])
             bekerja = st.selectbox("BEKERJA/TIDAK", ["YA", "TIDAK"])
             submit = st.form_submit_button("🔮 Prediksi")
@@ -461,7 +430,12 @@ with tab_form:
         if submit:
             inputs_form = {"USIAMASUK": USIAMASUK, "IP2": IP2, "IP3": IP3, "IP5": IP5, "rata-rata nilai": rata_rata, "mandiri/flagsip": jalur, "BEKERJA/TIDAK": bekerja}
             X_one = pd.DataFrame([inputs_form])
+            
+            # --- PERBAIKAN: Logika prediksi dan rekomendasi disatukan ---
+            # 1. Lakukan prediksi satu kali
             pred = pipe.predict(X_one)[0]
+            
+            # 2. Hitung probabilitas (jika tersedia)
             proba_str = ""
             if hasattr(pipe.named_steps["model"], "predict_proba"):
                 try:
@@ -471,9 +445,27 @@ with tab_form:
                     proba_str = f" — Probabilitas({positive_value}): **{p_pos:.3f}**"
                 except Exception:
                     proba_str = " (probabilitas tidak tersedia)"
+
+            # 3. Tampilkan hasil prediksi utama
             st.success(f"**Hasil Prediksi:** **{pred}**{proba_str}")
-            # Menampilkan rekomendasi dinamis
-            st.markdown(predict_and_recommend(pipe, inputs_form, positive_value).split("\n\n", 1)[1])
+
+            # 4. Bangun dan tampilkan rekomendasi berdasarkan hasil prediksi
+            status_bekerja = str(inputs_form.get("BEKERJA/TIDAK", "")).upper()
+            if pred == positive_value:
+                header = "🎉 *Selamat! Anda diprediksi lulus tepat waktu.*"
+                rekomendasi = ["- Pertahankan/tambah IP tiap semester", "- Jaga nilai rata-rata tetap tinggi"]
+                if status_bekerja == "YA": rekomendasi.append("- Tetap fokus meski sambil bekerja")
+                else: rekomendasi.append("- Manfaatkan waktu luang untuk kegiatan akademik")
+                rekomendasi.extend(["- Pilih jalur yang sesuai kemampuan", "- Konsultasi rutin dengan dosen pembimbing"])
+                st.info(header + "\n" + "\n".join(rekomendasi))
+            else:
+                header = "⚠️ *Peluang lulus tepat waktu belum optimal.*"
+                rekomendasi = ["- Tingkatkan IP (IP2, IP3, IP5) berikutnya", "- Upayakan nilai rata-rata naik"]
+                if status_bekerja == "YA": rekomendasi.append("- Kurangi aktivitas yang mengganggu akademik")
+                else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
+                rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
+                st.warning(header + "\n" + "\n".join(rekomendasi))
+            # --- AKHIR PERBAIKAN ---
 
 with tab_chat:
     st.subheader("4) Chatbot Akademik — Tanya Jawab & Rekomendasi")
@@ -499,10 +491,38 @@ with tab_chat:
             missing = missing_features(st.session_state.chat_features)
             
             if not missing:
-                response = predict_and_recommend(pipe, st.session_state.chat_features, positive_value)
+                # --- PERBAIKAN: Logika chatbot juga disatukan ---
+                features_dict = st.session_state.chat_features
+                one = pd.DataFrame([features_dict])
+                pred = pipe.predict(one)[0]
+                proba_str = ""
+                if hasattr(pipe.named_steps["model"], "predict_proba"):
+                    try:
+                        proba = pipe.predict_proba(one)
+                        pos_index = list(pipe.classes_).index(positive_value)
+                        p_pos = proba[0, pos_index]
+                        proba_str = f" (Probabilitas: {p_pos:.2f})"
+                    except Exception:
+                        proba_str = ""
+                
+                status_bekerja = str(features_dict.get("BEKERJA/TIDAK", "")).upper()
+                if pred == positive_value:
+                    header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n🎉 *Selamat! Anda diprediksi lulus tepat waktu.*"
+                    rekomendasi = ["- Pertahankan/tambah IP tiap semester", "- Jaga nilai rata-rata tetap tinggi"]
+                    if status_bekerja == "YA": rekomendasi.append("- Tetap fokus meski sambil bekerja")
+                    else: rekomendasi.append("- Manfaatkan waktu luang untuk kegiatan akademik")
+                    rekomendasi.extend(["- Pilih jalur yang sesuai kemampuan", "- Konsultasi rutin dengan dosen pembimbing"])
+                    response = header + "\n" + "\n".join(rekomendasi)
+                else:
+                    header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n⚠️ *Peluang lulus tepat waktu belum optimal.*"
+                    rekomendasi = ["- Tingkatkan IP (IP2, IP3, IP5) berikutnya", "- Upayakan nilai rata-rata naik"]
+                    if status_bekerja == "YA": rekomendasi.append("- Kurangi aktivitas yang mengganggu akademik")
+                    else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
+                    rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
+                    response = header + "\n" + "\n".join(rekomendasi)
+                
                 st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES} # Reset
             else:
-                # --- PERUBAHAN: Menambahkan detail pada pesan permintaan data ---
                 ask_parts = []
                 for m in missing:
                     if m == "USIAMASUK": ask_parts.append("USIAMASUK (angka, tahun)")
