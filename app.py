@@ -449,9 +449,9 @@ with tab_train:
                         y_test, y_pred, average="binary", pos_label=positive_value, zero_division=0
                     )
                     st.success(
-                        f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}**  "
-                        f"Precision: **{prec:.3f}**  "
-                        f"Recall: **{rec:.3f}**  "
+                        f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}** "
+                        f"Precision: **{prec:.3f}** "
+                        f"Recall: **{rec:.3f}** "
                         f"F1: **{f1:.3f}**"
                     )
 
@@ -524,12 +524,13 @@ with tab_train:
 # =========================================================
 REQUIRED_FEATURES = ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai", "mandiri/flagsip", "BEKERJA/TIDAK"]
 
+# --- PERBAIKAN DIMULAI DI SINI ---
 # Pola regex toleran: IP/IPK/IPS, ada/tanpa spasi, desimal . atau ,
 FEATURE_PATTERNS = {
     "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
-    "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*(0-4?)", re.I),
-    "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*(0-4?)", re.I),
-    "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*(0-4?)", re.I),
+    "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
+    "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
+    "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
     "rata-rata nilai": re.compile(r"(rata[- ]?rata\s*nilai|nilai\s*rata[- ]?rata|rerata)\s*[:=]?\s*(\d{1,3})", re.I),
 }
 
@@ -555,7 +556,7 @@ def extract_features_from_text(text: str, current: dict) -> dict:
                     pass
 
     # 1b) Fallback: tangkap SEMUA pola IP (IP/IPK/IPS) dengan spasi/_, koma + spasi, dan tanda baca lebar
-    for m in re.finditer(r"\bip(?:k|s)?[\s_\-]*([235])\b\s*(?:[:=：＝]|\s)\s*(0-4?)", t, re.I):
+    for m in re.finditer(r"\bip(?:k|s)?[\s_\-]*([235])\b\s*(?:[:=：＝]|\s)\s*([0-4](?:[.,]\d{1,2})?)", t, re.I):
         idx = m.group(1)
         raw = m.group(2)
         val = raw.replace(" ", "").replace(",", ".")
@@ -563,6 +564,7 @@ def extract_features_from_text(text: str, current: dict) -> dict:
             out[f"IP{idx}"] = float(val)
         except Exception:
             pass
+# --- PERBAIKAN BERAKHIR DI SINI ---
 
     # 2) Kategori jalur
     if re.search(r"\bmandiri\b", t, re.I):
