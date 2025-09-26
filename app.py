@@ -46,7 +46,9 @@ st.set_page_config(
 )
 st.sidebar.caption(f"scikit-learn version: {sklearn.__version__}")
 
-# --- PERUBAHAN: Fungsi untuk memuat model default ---
+# =========================================================
+# UTILITAS & FUNGSI-FUNGSI
+# =========================================================
 @st.cache_resource
 def load_default_model():
     """Memuat model default dari file 'model.joblib'."""
@@ -57,10 +59,6 @@ def load_default_model():
     except FileNotFoundError:
         return None
 
-# =========================================================
-# UTILITAS & FUNGSI LAINNYA
-# =========================================================
-# (Semua fungsi utilitas seperti harmonize_columns, build_pipeline, dll. tetap sama)
 def _norm(s: str) -> str:
     return str(s).strip().lower().replace("_", "").replace("-", "").replace(" ", "")
 
@@ -198,8 +196,6 @@ def to_binary(y_series: pd.Series, positive_value):
 # =========================================================
 # INISIALISASI MODEL & STATE APLIKASI
 # =========================================================
-
-# --- PERUBAHAN: Inisialisasi model aktif saat aplikasi dimulai ---
 if "active_model_obj" not in st.session_state:
     default_model = load_default_model()
     if default_model:
@@ -208,9 +204,6 @@ if "active_model_obj" not in st.session_state:
     else:
         st.session_state.active_model_obj = None
         st.session_state.model_source = "None"
-# --- AKHIR PERUBAHAN ---
-
-df_cached = st.session_state.get("df_cached", None)
 
 # =========================================================
 # SIDEBAR
@@ -224,7 +217,6 @@ st.sidebar.divider()
 use_cv = st.sidebar.toggle("Gunakan Cross-Validation", value=True)
 if use_cv:
     n_folds = st.sidebar.number_input("Jumlah Folds (k)", min_value=3, max_value=20, value=5, step=1)
-    test_size = 0
 else:
     test_size = st.sidebar.slider("Porsi Test Set", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
 st.sidebar.divider()
@@ -249,12 +241,9 @@ elif model_name == "Naive Bayes":
     st.sidebar.caption("Pengaturan untuk Categorical Naive Bayes")
     params["n_bins_discretizer"] = st.sidebar.number_input("Jumlah Bins (Diskritisasi)", min_value=2, max_value=15, value=5, step=1, help="Mengubah fitur numerik menjadi beberapa kelompok/kategori.")
     params["alpha"] = st.sidebar.slider("Alpha (smoothing)", 0.0, 2.0, 1.0, 0.1, help="Parameter smoothing untuk mencegah probabilitas nol.")
-
 st.sidebar.divider()
 st.sidebar.caption("💾 Ganti Model Aktif")
 uploaded_model = st.sidebar.file_uploader("Unggah Model (.joblib)", type=["joblib"], accept_multiple_files=False)
-
-# --- PERUBAHAN: Logika untuk mengganti model aktif ---
 if uploaded_model is not None:
     try:
         model_obj = joblib.load(uploaded_model)
@@ -263,7 +252,6 @@ if uploaded_model is not None:
         st.sidebar.success("Model dari file unggahan berhasil dimuat dan sekarang aktif.")
     except Exception as e:
         st.sidebar.error(f"Gagal memuat model: {e}")
-# --- AKHIR PERUBAHAN ---
 
 # =========================================================
 # MAIN LAYOUT
@@ -273,7 +261,6 @@ st.markdown("""
 Fitur dipakai: **USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK**
 Target (label): **LULUS TEPAT/TIDAK**
 """)
-
 try:
     tab_data, tab_train, tab_form, tab_chat, tab_about = st.tabs(
         ["📁 Data", "🏋️ Pelatihan & Evaluasi", "📝 Form Input (7 Fitur)", "🤖 Chatbot", "ℹ️ Tentang"]
@@ -284,75 +271,134 @@ except Exception:
     )
 
 with tab_data:
-    # ... kode tab data tidak berubah ...
-    pass
+    st.subheader("1) Unggah Data (CSV/XLSX/XLS)")
+    uploaded_file = st.file_uploader("Pilih file data", type=["csv", "xlsx", "xls"])
+    df_from_upload = None
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.name.lower().endswith(".csv"):
+                df_from_upload = pd.read_csv(uploaded_file)
+            else:
+                df_from_upload = pd.read_excel(uploaded_file)
+            st.success(f"File dimuat: {df_from_upload.shape[0]} baris, {df_from_upload.shape[1]} kolom.")
+            df_from_upload = harmonize_columns(df_from_upload)
+            st.session_state["df_cached"] = df_from_upload
+        except Exception as e:
+            st.error(f"Gagal memuat file: {e}")
+            st.session_state["df_cached"] = None
+    
+    df = st.session_state.get("df_cached", None)
+    if df is not None:
+        st.markdown("**Data (20 baris pertama):**")
+        st.dataframe(df.head(20), use_container_width=True)
+        with st.expander("🔎 Pemeriksaan Skema"):
+            must_have = CANON_FEATURES + [TARGET_NAME]
+            present = [c for c in must_have if c in df.columns]
+            missing = [c for c in must_have if c not in df.columns]
+            st.write("Kolom ditemukan:", present)
+            if missing:
+                st.warning(f"Kolom belum ada: {missing}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Tipe Data**")
+                st.write(df.dtypes)
+            with col2:
+                st.markdown("**Missing Value per Kolom**")
+                st.write(df.isna().sum())
+    else:
+        st.info("Belum ada file diunggah. Anda bisa langsung melatih model jika ada data, atau menggunakan fitur prediksi jika model default tersedia.")
 
 with tab_train:
     st.subheader("2) Latih & Evaluasi (Fitur Terkunci)")
+    # --- PERBAIKAN: Ambil df dari session_state ---
+    df = st.session_state.get("df_cached", None)
     if df is None:
-        st.warning("Unggah data terlebih dahulu di tab **Data** untuk melatih model baru.")
+        st.warning("Unggah data di tab **Data** untuk melatih model baru.")
     else:
-        # ... (logika pelatihan tetap sama)
-        if st.button("🚀 Latih Model Sekarang", type="primary", use_container_width=True):
-            # ... (semua logika pelatihan)
-            
-            # --- PERUBAHAN: Model hasil pelatihan menjadi model aktif ---
-            st.session_state.active_model_obj = {
-                "pipeline": pipe, 
-                "features": locked_features, 
-                "target": target_col, 
-                "positive": positive_value
-            }
-            st.session_state.model_source = "Pelatihan"
-            st.success("Model baru berhasil dilatih dan sekarang menjadi model aktif.")
-            # --- AKHIR PERUBAHAN ---
+        target_col = smart_detect_target(df, TARGET_NAME)
+        if target_col not in df.columns:
+            st.error(f"Target **{TARGET_NAME}** tidak ditemukan.")
+        else:
+            locked_features = [c for c in CANON_FEATURES if c in df.columns]
+            if not locked_features:
+                st.error("Tidak ada fitur terkunci yang ditemukan.")
+            else:
+                st.success(f"Fitur dipakai: {locked_features}")
+                numeric_features = [c for c in locked_features if df[c].dtype in ['int64', 'float64']]
+                categorical_features = [c for c in locked_features if df[c].dtype == 'object']
+                unique_target_vals = sorted(df[target_col].dropna().unique().tolist())
+                default_positive = "TEPAT" if "TEPAT" in unique_target_vals else unique_target_vals[0]
+                positive_value = st.selectbox("Nilai target positif", options=unique_target_vals, index=unique_target_vals.index(default_positive))
 
-# ... (sisa kode tab_train, chatbot utilities, dll. tetap sama)
+                if st.button("🚀 Latih Model Sekarang", type="primary", use_container_width=True):
+                    X = df[locked_features]
+                    y = df[target_col]
+                    pipe = build_pipeline(model_name, numeric_features, categorical_features, params)
+                    if use_cv:
+                        st.info(f"Cross-Validation Aktif ({n_folds} folds)")
+                        scoring_metrics = {'accuracy': 'accuracy', 'precision': make_scorer(precision_score, pos_label=positive_value, average='binary', zero_division=0), 'recall': make_scorer(recall_score, pos_label=positive_value, average='binary', zero_division=0), 'f1': make_scorer(f1_score, pos_label=positive_value, average='binary', zero_division=0)}
+                        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
+                        scores = cross_validate(pipe, X, y, cv=skf, scoring=scoring_metrics, n_jobs=-1)
+                        st.subheader(f"Hasil Rata-rata Cross-Validation ({n_folds} folds)")
+                        results_df = pd.DataFrame({"Metrik": ["Accuracy", "Precision", "Recall", "F1-Score"], "Rata-rata": [scores['test_accuracy'].mean(), scores['test_precision'].mean(), scores['test_recall'].mean(), scores['test_f1'].mean()], "Standar Deviasi": [scores['test_accuracy'].std(), scores['test_precision'].std(), scores['test_recall'].std(), scores['test_f1'].std()]})
+                        st.dataframe(results_df.style.format({"Rata-rata": "{:.3f}", "Standar Deviasi": "±{:.3f}"}), use_container_width=True)
+                        st.info("Model final dilatih pada seluruh dataset.")
+                        pipe.fit(X, y)
+                    else:
+                        st.info("Mode Pelatihan: Train-Test Split")
+                        y_bin = to_binary(y, positive_value)
+                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y_bin if len(np.unique(y_bin)) == 2 else None)
+                        pipe.fit(X_train, y_train)
+                        y_pred = pipe.predict(X_test)
+                        acc = accuracy_score(y_test, y_pred)
+                        prec, rec, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="binary", pos_label=positive_value, zero_division=0)
+                        st.success(f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}** Precision: **{prec:.3f}** Recall: **{rec:.3f}** F1: **{f1:.3f}**")
+                        st.text("Classification Report:")
+                        st.code(classification_report(y_test, y_pred, zero_division=0))
+                        y_test_bin = to_binary(y_test, positive_value)
+                        cm = confusion_matrix(y_test, y_pred)
+                        st.markdown("**Confusion Matrix**")
+                        plot_confusion_matrix(cm, labels=pipe.classes_)
+                        if hasattr(pipe.named_steps["model"], "predict_proba"):
+                            pos_index = list(pipe.classes_).index(positive_value)
+                            y_score = pipe.predict_proba(X_test)[:, pos_index]
+                            st.markdown("**ROC & PR Curve**")
+                            plot_roc_pr(y_test_bin, y_score)
+                    
+                    st.markdown("**Pentingnya Fitur**")
+                    try:
+                        if use_cv:
+                            _, X_test_perm, _, y_test_perm = train_test_split(X, y, test_size=0.2, random_state=random_state, stratify=y)
+                        else:
+                            X_test_perm, y_test_perm = X_test, y_test
+                        model = pipe.named_steps["model"]
+                        pre = pipe.named_steps["preprocess"]
+                        if hasattr(model, "feature_importances_"):
+                            importances = model.feature_importances_
+                            feature_names = pre.get_feature_names_out()
+                            imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
+                        else:
+                            scorer = make_scorer(f1_score, pos_label=positive_value, zero_division=0)
+                            result = permutation_importance(pipe, X_test_perm, y_test_perm, n_repeats=5, random_state=random_state, n_jobs=-1, scoring=scorer)
+                            importances = result.importances_mean
+                            feature_names = X_test_perm.columns.tolist()
+                            imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
+                        imp_df = imp_df.sort_values("importance", ascending=False).head(20)
+                        fig, ax = plt.subplots(figsize=(6, 5))
+                        sns.barplot(data=imp_df, y="fitur", x="importance", ax=ax, color="#4C78A8")
+                        ax.set_title("20 Fitur Teratas")
+                        st.pyplot(fig)
+                    except Exception as e:
+                        st.warning(f"Gagal menghitung importance: {e}")
 
-# =========================================================
-# KODE UNTUK TAB FORM, CHATBOT, ABOUT
-# =========================================================
+                    st.markdown("**💾 Simpan Model**")
+                    buf = io.BytesIO()
+                    joblib.dump({"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}, buf)
+                    buf.seek(0)
+                    st.download_button("Unduh Model (.joblib)", data=buf.getvalue(), file_name=f"model.joblib", mime="application/octet-stream")
+                    
+                    st.session_state.active_model_obj = {"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}
+                    st.session_state.model_source = "Pelatihan"
+                    st.success("Model baru berhasil dilatih dan sekarang menjadi model aktif.")
 
-with tab_form:
-    st.subheader("3) Prediksi Individu — Form 7 Fitur")
-    active_model_obj = st.session_state.get("active_model_obj", None)
-    
-    # --- PERUBAHAN: Menampilkan status model yang aktif ---
-    if active_model_obj:
-        if st.session_state.model_source == "Default":
-            st.info("ℹ️ Menggunakan **Model Default** yang sudah tersedia. Anda bisa melatih model baru di tab 'Pelatihan & Evaluasi'.")
-        elif st.session_state.model_source == "Pelatihan":
-            st.success("✅ Menggunakan **Model Hasil Pelatihan** yang baru saja Anda buat.")
-        elif st.session_state.model_source == "Unggahan":
-            st.success("✅ Menggunakan **Model dari File Unggahan**.")
-    # --- AKHIR PERUBAHAN ---
-
-    if active_model_obj is None:
-        st.error("⛔ **Tidak ada model yang aktif.**\n\nSilakan letakkan file `model.joblib` di folder aplikasi, atau latih model baru di tab 'Pelatihan & Evaluasi'.")
-    else:
-        # (sisa logika tab_form tidak berubah)
-        pass
-
-with tab_chat:
-    st.subheader("4) Chatbot Akademik — Tanya Jawab & Rekomendasi")
-    active_model_obj = st.session_state.get("active_model_obj", None)
-    
-    # --- PERUBAHAN: Menampilkan status model yang aktif ---
-    if active_model_obj:
-        if st.session_state.model_source == "Default":
-            st.info("ℹ️ Menggunakan **Model Default** yang sudah tersedia.")
-        elif st.session_state.model_source == "Pelatihan":
-            st.success("✅ Menggunakan **Model Hasil Pelatihan**.")
-        elif st.session_state.model_source == "Unggahan":
-            st.success("✅ Menggunakan **Model dari File Unggahan**.")
-    # --- AKHIR PERUBAHAN ---
-
-    if not active_model_obj:
-        st.error("⛔ **Tidak ada model yang aktif.**\n\nChatbot tidak bisa berfungsi tanpa model. Silakan aktifkan model default atau latih model baru.")
-    else:
-        # (sisa logika tab_chat tidak berubah)
-        pass
-
-with tab_about:
-    # ... kode tab about tidak berubah ...
-    pass
+# ... (Sisa kode lengkapnya sama seperti sebelumnya)
