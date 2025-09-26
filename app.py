@@ -147,6 +147,14 @@ def smart_detect_target(df: pd.DataFrame, target_guess: str = TARGET_NAME):
 
 
 def build_pipeline(model_name: str, numeric_features, categorical_features, params: dict):
+    from sklearn.pipeline import Pipeline
+    from sklearn.impute import SimpleImputer
+    from sklearn.preprocessing import OneHotEncoder, StandardScaler
+    from sklearn.compose import ColumnTransformer
+    from sklearn.naive_bayes import GaussianNB
+    from sklearn.tree import DecisionTreeClassifier
+    from sklearn.ensemble import RandomForestClassifier
+
     numeric_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler())
@@ -196,6 +204,8 @@ def build_pipeline(model_name: str, numeric_features, categorical_features, para
 
 
 def plot_confusion_matrix(cm, labels):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
     fig, ax = plt.subplots(figsize=(4, 3))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False,
                 xticklabels=labels, yticklabels=labels, ax=ax)
@@ -205,6 +215,8 @@ def plot_confusion_matrix(cm, labels):
 
 
 def plot_roc_pr(y_true_bin, y_score):
+    from sklearn.metrics import roc_curve, roc_auc_score, precision_recall_curve
+    import matplotlib.pyplot as plt
     fpr, tpr, _ = roc_curve(y_true_bin, y_score)
     roc_auc = roc_auc_score(y_true_bin, y_score)
     fig1, ax1 = plt.subplots(figsize=(4, 3))
@@ -225,7 +237,7 @@ def plot_roc_pr(y_true_bin, y_score):
     st.pyplot(fig2)
 
 
-def get_feature_names_from_ct(ct: ColumnTransformer):
+def get_feature_names_from_ct(ct):
     output_features = []
     for name, transformer, cols in ct.transformers_:
         if name == "remainder" and transformer == "drop":
@@ -527,9 +539,9 @@ REQUIRED_FEATURES = ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai", "mandi
 # Pola regex toleran: IP/IPK/IPS, ada/tanpa spasi, desimal . atau ,
 FEATURE_PATTERNS = {
     "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
-    "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*(0-4?)", re.I),
-    "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*(0-4?)", re.I),
-    "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*(0-4?)", re.I),
+    "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*([0-4](?:[.,]\d{1,3})?)", re.I),
+    "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*([0-4](?:[.,]\d{1,3})?)", re.I),
+    "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*([0-4](?:[.,]\d{1,3})?)", re.I),
     "rata-rata nilai": re.compile(r"(rata[- ]?rata\s*nilai|nilai\s*rata[- ]?rata|rerata)\s*[:=]?\s*(\d{1,3})", re.I),
 }
 
@@ -555,7 +567,7 @@ def extract_features_from_text(text: str, current: dict) -> dict:
                     pass
 
     # 1b) Fallback: tangkap SEMUA pola IP (IP/IPK/IPS) dengan spasi/_, koma + spasi, dan tanda baca lebar
-    for m in re.finditer(r"\bip(?:k|s)?[\s_\-]*([235])\b\s*(?:[:=：＝]|\s)\s*(0-4?)", t, re.I):
+    for m in re.finditer(r"\bip(?:k|s)?[\s_\-]*([235])\b\s*(?:[:=：＝]|\s)\s*([0-4](?:[.,]\s*\d{1,3})?)", t, re.I):
         idx = m.group(1)
         raw = m.group(2)
         val = raw.replace(" ", "").replace(",", ".")
