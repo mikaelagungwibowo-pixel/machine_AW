@@ -73,6 +73,7 @@ NAME_MAP = {
     "avgscore": "rata-rata nilai",
     "nilaiavg": "rata-rata nilai",
     "nilai_rerata": "rata-rata nilai",
+    "rerata": "rata-rata nilai",  # ✅ tambahan agar 'rerata=82' terbaca
     # Jalur
     "jalur": "mandiri/flagsip",
     "mandiri/flagsip": "mandiri/flagsip",
@@ -516,15 +517,17 @@ with tab_train:
 # =========================================================
 REQUIRED_FEATURES = ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai", "mandiri/flagsip", "BEKERJA/TIDAK"]
 
+# ✅ Pola regex yang toleran: IP/IPK/IPS, ada/tanpa spasi, desimal . atau ,
 FEATURE_PATTERNS = {
     # Contoh: "usia 19", "usia_masuk=18", "umur: 20"
     "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
-    # Contoh: "ip2=3.25", "IP2 3.0"
-    "IP2": re.compile(r"\bip2\b\s*[:=]?\s*(0-4?)", re.I),
-    # Contoh: "ip3: 2.75", "IP3 3"
-    "IP3": re.compile(r"\bip3\b\s*[:=]?\s*(0-4?)", re.I),
-    # Contoh: "ip5=3.80", "IP5 3.5"
-    "IP5": re.compile(r"\bip5\b\s*[:=]?\s*(0-4?)", re.I),
+
+    # IP2/IP3/IP5: 'ip' atau 'ipk' atau 'ips', spasi opsional, angka 2/3/5,
+    # pemisah opsional ':=' dan desimal '.' atau ','
+    "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*(0-4?)", re.I),
+    "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*([-4?)", re.I),
+    "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*([0-4](?:[e.I),
+
     # Contoh: "rata-rata nilai=82", "rerata: 78"
     "rata-rata nilai": re.compile(r"(rata[- ]?rata\s*nilai|nilai\s*rata[- ]?rata|rerata)\s*[:=]?\s*(\d{1,3})", re.I),
 }
@@ -533,14 +536,15 @@ def extract_features_from_text(text: str, current: dict) -> dict:
     t = text.strip()
     out = dict(current)
 
-    # Angka-angka via regex
+    # 1) Angka-angka via regex khusus fitur (IP & rerata)
     for key, pat in FEATURE_PATTERNS.items():
         m = pat.search(t)
         if m:
             val = m.group(m.lastindex) if m.lastindex else m.group(1)
+            val = val.replace(',', '.')  # normalisasi desimal koma→titik
             if key in {"rata-rata nilai", "USIAMASUK"}:
                 try:
-                    out[key] = int(val)
+                    out[key] = int(float(val))  # aman untuk "82.0"
                 except Exception:
                     pass
             else:
@@ -549,36 +553,37 @@ def extract_features_from_text(text: str, current: dict) -> dict:
                 except Exception:
                     pass
 
-    # Kategori jalur: mandiri / flagsip/flagship
+    # 2) Kategori jalur: mandiri / flagsip/flagship
     if re.search(r"\bmandiri\b", t, re.I):
         out["mandiri/flagsip"] = "MANDIRI"
     if re.search(r"\bflag(ship|sip)\b", t, re.I):
         out["mandiri/flagsip"] = "FLAGSIP"
 
-    # Bekerja: YA/TIDAK
+    # 3) Bekerja: YA/TIDAK
     if re.search(r"\b(bekerja|kerja)\b", t, re.I):
         out["BEKERJA/TIDAK"] = "YA"
     if re.search(r"\b(tidak\s*(bekerja|kerja)|nggak\s*kerja|gak\s*kerja|tidak)\b", t, re.I):
         out["BEKERJA/TIDAK"] = "TIDAK"
 
-    # Assignment gaya 'fitur=nilai'
-    assign_pairs = re.findall(r"([a-zA-Z/\- ]+)\s*=\s*([\w\.]+)", t)
+    # 4) Assignment gaya 'fitur=nilai' (terima koma)
+    assign_pairs = re.findall(r"([a-zA-Z/\- ]+)\s*=\s*([\w\.,]+)", t)
     for k_raw, v_raw in assign_pairs:
         k = _norm(k_raw)
+        v = v_raw.replace(',', '.')  # normalisasi desimal
         if k in NAME_MAP:
             canon = NAME_MAP[k]
             if canon in {"mandiri/flagsip", "BEKERJA/TIDAK"}:
-                if _norm(v_raw) in {"mandiri"}:
+                if _norm(v) in {"mandiri"}:
                     out[canon] = "MANDIRI"
-                elif _norm(v_raw) in {"flagsip", "flagship"}:
+                elif _norm(v) in {"flagsip", "flagship"}:
                     out[canon] = "FLAGSIP"
-                elif _norm(v_raw) in {"ya", "true", "1"}:
+                elif _norm(v) in {"ya", "true", "1"}:
                     out[canon] = "YA"
-                elif _norm(v_raw) in {"tidak", "false", "0"}:
+                elif _norm(v) in {"tidak", "false", "0"}:
                     out[canon] = "TIDAK"
             else:
                 try:
-                    out[canon] = float(v_raw) if canon not in {"USIAMASUK", "rata-rata nilai"} else int(v_raw)
+                    out[canon] = float(v) if canon not in {"USIAMASUK", "rata-rata nilai"} else int(float(v))
                 except Exception:
                     pass
     return out
