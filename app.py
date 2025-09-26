@@ -15,7 +15,8 @@ from sklearn.metrics import (
     roc_auc_score, roc_curve, precision_recall_curve, classification_report,
     f1_score, make_scorer,
 )
-from sklearn.model_selection import train_test_split
+# --- PERUBAHAN: Impor cross_validate & StratifiedKFold ---
+from sklearn.model_selection import train_test_split, cross_validate, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.inspection import permutation_importance
@@ -256,7 +257,18 @@ st.sidebar.caption("Model & parameter pelatihan")
 model_name = st.sidebar.selectbox(
     "Pilih Model", ["Random Forest", "Decision Tree", "Naive Bayes"], index=0
 )
-test_size = st.sidebar.slider("Porsi Test Set", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
+
+# --- PERUBAHAN: Opsi Cross-Validation di sidebar ---
+st.sidebar.divider()
+use_cv = st.sidebar.toggle("Gunakan Cross-Validation", value=True)
+if use_cv:
+    n_folds = st.sidebar.number_input("Jumlah Folds (k)", min_value=3, max_value=20, value=5, step=1)
+    test_size = 0 # Tidak dipakai jika CV aktif
+else:
+    test_size = st.sidebar.slider("Porsi Test Set", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
+st.sidebar.divider()
+# --- AKHIR PERUBAHAN ---
+
 random_state = st.sidebar.number_input("Random State", value=42, step=1)
 params = {"random_state": random_state}
 if model_name == "Random Forest":
@@ -421,61 +433,105 @@ with tab_train:
                 if run_train:
                     X = df[locked_features].copy()
                     y = df[target_col].copy()
-                    y_bin = to_binary(y, positive_value)
-
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=test_size, random_state=random_state,
-                        stratify=y_bin if len(np.unique(y_bin)) == 2 else None
-                    )
-                    y_test_bin = to_binary(y_test, positive_value)
-
+                    
                     pipe = build_pipeline(model_name, numeric_features, categorical_features, params)
-                    pipe.fit(X_train, y_train)
-                    y_pred = pipe.predict(X_test)
 
-                    # Probabilitas (jika tersedia)
-                    y_score = None
-                    if hasattr(pipe.named_steps["model"], "predict_proba"):
+                    # --- PERUBAHAN: Logika Pelatihan dengan Opsi CV ---
+                    if use_cv:
+                        st.info(f"Cross-Validation Aktif ({n_folds} folds)")
+                        
+                        # Definisikan metrik scorer
+                        f1_scorer = make_scorer(f1_score, pos_label=positive_value, average='binary', zero_division=0)
+                        precision_scorer = make_scorer(precision_recall_fscore_support, pos_label=positive_value, average='binary', beta=1, zero_division=0, ret_prec_rec_f1=True)[0]
+                        recall_scorer = make_scorer(precision_recall_fscore_support, pos_label=positive_value, average='binary', beta=1, zero_division=0, ret_prec_rec_f1=True)[1]
+                        
+                        scoring_metrics = {
+                            'accuracy': 'accuracy',
+                            'precision': make_scorer(precision_recall_fscore_support, pos_label=positive_value, average='binary', zero_division=0, ret_prec_rec_f1=False)[0],
+                            'recall': make_scorer(precision_recall_fscore_support, pos_label=positive_value, average='binary', zero_division=0, ret_prec_rec_f1=False)[1],
+                            'f1': make_scorer(f1_score, pos_label=positive_value, average='binary', zero_division=0)
+                        }
+
+                        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
+                        
+                        scores = cross_validate(pipe, X, y, cv=skf, scoring=scoring_metrics, n_jobs=-1)
+                        
+                        st.subheader(f"Hasil Rata-rata Cross-Validation ({n_folds} folds)")
+                        results_df = pd.DataFrame({
+                            "Metrik": ["Accuracy", "Precision", "Recall", "F1-Score"],
+                            "Rata-rata": [scores['test_accuracy'].mean(), scores['test_precision'].mean(), scores['test_recall'].mean(), scores['test_f1'].mean()],
+                            "Standar Deviasi": [scores['test_accuracy'].std(), scores['test_precision'].std(), scores['test_recall'].std(), scores['test_f1'].std()]
+                        })
+                        st.dataframe(results_df.style.format({
+                            "Rata-rata": "{:.3f}",
+                            "Standar Deviasi": "±{:.3f}"
+                        }), use_container_width=True)
+
+                        st.info("Setelah evaluasi, model final dilatih pada seluruh dataset untuk diunduh.")
+                        # Latih model final pada seluruh data
+                        pipe.fit(X, y)
+                        
+                    else: # Logika lama jika CV tidak aktif
+                        st.info("Mode Pelatihan: Train-Test Split")
+                        y_bin = to_binary(y, positive_value)
+                        X_train, X_test, y_train, y_test = train_test_split(
+                            X, y, test_size=test_size, random_state=random_state,
+                            stratify=y_bin if len(np.unique(y_bin)) == 2 else None
+                        )
+                        y_test_bin = to_binary(y_test, positive_value)
+
+                        pipe.fit(X_train, y_train)
+                        y_pred = pipe.predict(X_test)
+                        
+                        acc = accuracy_score(y_test, y_pred)
+                        prec, rec, f1, _ = precision_recall_fscore_support(
+                            y_test, y_pred, average="binary", pos_label=positive_value, zero_division=0
+                        )
+                        st.success(
+                            f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}** "
+                            f"Precision: **{prec:.3f}** "
+                            f"Recall: **{rec:.3f}** "
+                            f"F1: **{f1:.3f}**"
+                        )
+
+                        st.text("Classification Report:")
+                        st.code(classification_report(y_test, y_pred, zero_division=0))
+
+                        labels_for_cm = list(dict.fromkeys([positive_value] + [v for v in unique_target_vals if v != positive_value]))
+                        cm = confusion_matrix(y_test, y_pred, labels=labels_for_cm[:2] if len(labels_for_cm) >= 2 else labels_for_cm)
+                        st.markdown("**Confusion Matrix**")
                         try:
-                            proba = pipe.predict_proba(X_test)
-                            classes = pipe.named_steps["model"].classes_
-                            pos_index = list(classes).index(positive_value) if positive_value in classes else (1 if proba.shape[1] > 1 else 0)
-                            y_score = proba[:, pos_index]
+                            plot_labels = labels_for_cm[:2] if cm.shape == (2, 2) else labels_for_cm[: cm.shape[0]]
+                            plot_confusion_matrix(cm, labels=[str(l) for l in plot_labels])
                         except Exception:
-                            y_score = None
+                            st.write(cm)
+                        
+                        y_score = None
+                        if hasattr(pipe.named_steps["model"], "predict_proba"):
+                            try:
+                                proba = pipe.predict_proba(X_test)
+                                classes = pipe.named_steps["model"].classes_
+                                pos_index = list(classes).index(positive_value) if positive_value in classes else (1 if proba.shape[1] > 1 else 0)
+                                y_score = proba[:, pos_index]
+                            except Exception:
+                                y_score = None
 
-                    acc = accuracy_score(y_test, y_pred)
-                    prec, rec, f1, _ = precision_recall_fscore_support(
-                        y_test, y_pred, average="binary", pos_label=positive_value, zero_division=0
-                    )
-                    st.success(
-                        f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}** "
-                        f"Precision: **{prec:.3f}** "
-                        f"Recall: **{rec:.3f}** "
-                        f"F1: **{f1:.3f}**"
-                    )
+                        if y_score is not None and len(np.unique(y_test_bin)) == 2:
+                            st.markdown("**ROC & PR Curve**")
+                            plot_roc_pr(y_test_bin, y_score)
+                        else:
+                            st.info("ROC/PR tidak tersedia (model tidak menyediakan probabilitas atau target tidak biner).")
+                    # --- AKHIR PERUBAHAN ---
 
-                    st.text("Classification Report:")
-                    st.code(classification_report(y_test, y_pred, zero_division=0))
-
-                    labels_for_cm = list(dict.fromkeys([positive_value] + [v for v in unique_target_vals if v != positive_value]))
-                    cm = confusion_matrix(y_test, y_pred, labels=labels_for_cm[:2] if len(labels_for_cm) >= 2 else labels_for_cm)
-                    st.markdown("**Confusion Matrix**")
-                    try:
-                        plot_labels = labels_for_cm[:2] if cm.shape == (2, 2) else labels_for_cm[: cm.shape[0]]
-                        plot_confusion_matrix(cm, labels=[str(l) for l in plot_labels])
-                    except Exception:
-                        st.write(cm)
-
-                    if y_score is not None and len(np.unique(y_test_bin)) == 2:
-                        st.markdown("**ROC & PR Curve**")
-                        plot_roc_pr(y_test_bin, y_score)
-                    else:
-                        st.info("ROC/PR tidak tersedia (model tidak menyediakan probabilitas atau target tidak biner).")
-
-                    # Pentingnya Fitur
+                    # Pentingnya Fitur (dijalankan setelah model final dilatih)
                     st.markdown("**Pentingnya Fitur**")
                     try:
+                        # Untuk pentingnya fitur, kita perlu data test, jadi kita buat split sementara jika CV aktif
+                        if use_cv:
+                            _, X_test_perm, _, y_test_perm = train_test_split(X, y, test_size=0.2, random_state=random_state, stratify=y)
+                        else:
+                            X_test_perm, y_test_perm = X_test, y_test
+
                         model = pipe.named_steps["model"]
                         pre = pipe.named_steps["preprocess"]
                         feature_names = get_feature_names_from_ct(pre)
@@ -484,11 +540,8 @@ with tab_train:
                         else:
                             scorer = make_scorer(f1_score, pos_label=positive_value, zero_division=0)
                             result = permutation_importance(
-                                pipe, X_test, y_test,
-                                n_repeats=5,
-                                random_state=random_state,
-                                n_jobs=-1,
-                                scoring=scorer
+                                pipe, X_test_perm, y_test_perm,
+                                n_repeats=5, random_state=random_state, n_jobs=-1, scoring=scorer
                             )
                             importances = result.importances_mean
                         imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
