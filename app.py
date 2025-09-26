@@ -73,7 +73,7 @@ NAME_MAP = {
     "avgscore": "rata-rata nilai",
     "nilaiavg": "rata-rata nilai",
     "nilai_rerata": "rata-rata nilai",
-    "rerata": "rata-rata nilai",  # alias agar 'rerata=82' terbaca
+    "rerata": "rata-rata nilai",
     # Jalur
     "jalur": "mandiri/flagsip",
     "mandiri/flagsip": "mandiri/flagsip",
@@ -125,9 +125,16 @@ def harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
             return str(v).upper()
         df["BEKERJA/TIDAK"] = df["BEKERJA/TIDAK"].apply(norm_bin_work)
 
-    # 3) Pastikan numerik benar-benar numerik
+    # 3) Pastikan numerik benar-benar numerik (normalisasi koma → titik terlebih dahulu)
     for col in ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai"]:
         if col in df.columns:
+            if df[col].dtype == "object":
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.strip()
+                    .str.replace(",", ".", regex=False)
+                )
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
@@ -288,12 +295,13 @@ Fitur dipakai: **USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEK
 Target (label): **LULUS TEPAT/TIDAK**
 """)
 
-# Tambah tab (fallback tanpa ikon jika perlu)
+# Tambah tab Chatbot
 try:
     tab_data, tab_train, tab_form, tab_chat, tab_about = st.tabs(
         ["📁 Data", "🏋️ Pelatihan & Evaluasi", "📝 Form Input (7 Fitur)", "🤖 Chatbot", "ℹ️ Tentang"]
     )
 except Exception:
+    # Fallback jika icon menyebabkan masalah
     tab_data, tab_train, tab_form, tab_chat, tab_about = st.tabs(
         ["Data", "Pelatihan & Evaluasi", "Form Input (7 Fitur)", "Chatbot", "Tentang"]
     )
@@ -367,7 +375,7 @@ with tab_data:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         except Exception:
-            # Fallback: CSV jika openpyxl tidak tersedia
+            # Fallback: provide CSV jika openpyxl tidak tersedia
             csv_bytes = tpl_df.to_csv(index=False).encode("utf-8")
             st.download_button(
                 "Unduh Template CSV (sample_data_skematerkunci.csv)",
@@ -516,18 +524,12 @@ with tab_train:
 # =========================================================
 REQUIRED_FEATURES = ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai", "mandiri/flagsip", "BEKERJA/TIDAK"]
 
-# ✅ Pola regex toleran: IP/IPK/IPS, ada/tanpa spasi, desimal . atau ,
+# Pola regex toleran: IP/IPK/IPS, ada/tanpa spasi, desimal . atau ,
 FEATURE_PATTERNS = {
-    # Contoh: "usia 19", "usia_masuk=18", "umur: 20"
     "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
-
-    # IP2/IP3/IP5: 'ip' atau 'ipk' atau 'ips', spasi opsional, angka 2/3/5,
-    # pemisah opsional ':=' dan desimal '.' atau ','
     "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*(0-4?)", re.I),
     "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*(0-4?)", re.I),
     "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*(0-4?)", re.I),
-
-    # Contoh: "rata-rata nilai=82", "rerata: 78"
     "rata-rata nilai": re.compile(r"(rata[- ]?rata\s*nilai|nilai\s*rata[- ]?rata|rerata)\s*[:=]?\s*(\d{1,3})", re.I),
 }
 
@@ -543,7 +545,7 @@ def extract_features_from_text(text: str, current: dict) -> dict:
             val = val.replace(',', '.')  # normalisasi desimal koma→titik
             if key in {"rata-rata nilai", "USIAMASUK"}:
                 try:
-                    out[key] = int(float(val))  # aman untuk "82.0"
+                    out[key] = int(float(val))
                 except Exception:
                     pass
             else:
@@ -552,39 +554,60 @@ def extract_features_from_text(text: str, current: dict) -> dict:
                 except Exception:
                     pass
 
-    # 2) Kategori jalur: mandiri / flagsip/flagship
+    # 1b) Fallback: tangkap SEMUA pola IP (IP/IPK/IPS) dengan spasi/_, koma + spasi, dan tanda baca lebar
+    for m in re.finditer(r"\bip(?:k|s)?[\s_\-]*([235])\b\s*(?:[:=：＝]|\s)\s*(0-4?)", t, re.I):
+        idx = m.group(1)
+        raw = m.group(2)
+        val = raw.replace(" ", "").replace(",", ".")
+        try:
+            out[f"IP{idx}"] = float(val)
+        except Exception:
+            pass
+
+    # 2) Kategori jalur
     if re.search(r"\bmandiri\b", t, re.I):
         out["mandiri/flagsip"] = "MANDIRI"
     if re.search(r"\bflag(ship|sip)\b", t, re.I):
         out["mandiri/flagsip"] = "FLAGSIP"
 
-    # 3) Bekerja: YA/TIDAK
-    if re.search(r"\b(bekerja|kerja)\b", t, re.I):
-        out["BEKERJA/TIDAK"] = "YA"
-    if re.search(r"\b(tidak\s*(bekerja|kerja)|nggak\s*kerja|gak\s*kerja|tidak)\b", t, re.I):
-        out["BEKERJA/TIDAK"] = "TIDAK"
+    # 3) Penetapan eksplisit status kerja (menang atas heuristik)
+    m_status = re.search(r"\bstatus\s*(kerja|bekerja)\s*[:=]?\s*(ya|y|true|1|tidak|tdk|t|false|0)\b", t, re.I)
+    if m_status:
+        v = m_status.group(2).lower()
+        out["BEKERJA/TIDAK"] = "YA" if v in {"ya", "y", "true", "1"} else "TIDAK"
 
-    # 4) Assignment gaya 'fitur=nilai' (terima koma)
+    # 4) Assignment gaya 'fitur=nilai' (terima koma) — juga menang atas heuristik
     assign_pairs = re.findall(r"([a-zA-Z/\- ]+)\s*=\s*([\w\.,]+)", t)
     for k_raw, v_raw in assign_pairs:
         k = _norm(k_raw)
-        v = v_raw.replace(',', '.')  # normalisasi desimal
+        v = v_raw.replace(',', '.')
         if k in NAME_MAP:
             canon = NAME_MAP[k]
             if canon in {"mandiri/flagsip", "BEKERJA/TIDAK"}:
-                if _norm(v) in {"mandiri"}:
-                    out[canon] = "MANDIRI"
-                elif _norm(v) in {"flagsip", "flagship"}:
-                    out[canon] = "FLAGSIP"
-                elif _norm(v) in {"ya", "true", "1"}:
-                    out[canon] = "YA"
-                elif _norm(v) in {"tidak", "false", "0"}:
-                    out[canon] = "TIDAK"
+                vv = _norm(v)
+                if canon == "mandiri/flagsip":
+                    if vv == "mandiri":
+                        out[canon] = "MANDIRI"
+                    elif vv in {"flagsip", "flagship"}:
+                        out[canon] = "FLAGSIP"
+                else:
+                    if vv in {"ya", "y", "true", "1"}:
+                        out[canon] = "YA"
+                    elif vv in {"tidak", "tdk", "t", "false", "0"}:
+                        out[canon] = "TIDAK"
             else:
                 try:
                     out[canon] = float(v) if canon not in {"USIAMASUK", "rata-rata nilai"} else int(float(v))
                 except Exception:
                     pass
+
+    # 5) Heuristik status kerja — hanya bila belum ditetapkan di atas
+    if out.get("BEKERJA/TIDAK") is None:
+        if re.search(r"\b(tidak\s*(bekerja|kerja)|nggak\s*kerja|gak\s*kerja)\b", t, re.I):
+            out["BEKERJA/TIDAK"] = "TIDAK"
+        elif re.search(r"\b(bekerja|kerja)\b", t, re.I):
+            out["BEKERJA/TIDAK"] = "YA"
+
     return out
 
 
@@ -672,7 +695,7 @@ with tab_chat:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
             except Exception:
-                # Fallback untuk Streamlit lama
+                # Fallback untuk Streamlit versi lama: hanya tampilkan teks
                 role = msg.get("role", "assistant").capitalize()
                 st.markdown(f"**{role}:** {msg['content']}")
 
