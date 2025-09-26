@@ -17,7 +17,6 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split, cross_validate, StratifiedKFold
 from sklearn.pipeline import Pipeline
-# --- PERUBAHAN: Impor KBinsDiscretizer dan CategoricalNB ---
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, KBinsDiscretizer
 from sklearn.inspection import permutation_importance
 from sklearn.naive_bayes import GaussianNB, CategoricalNB
@@ -53,7 +52,47 @@ st.sidebar.caption(f"scikit-learn version: {sklearn.__version__}")
 def _norm(s: str) -> str:
     return str(s).strip().lower().replace("_", "").replace("-", "").replace(" ", "")
 
-# (Fungsi harmonize_columns dan smart_detect_target tetap sama)
+# --- PERBAIKAN: Kamus NAME_MAP dikembalikan ---
+# Pemetaan variasi nama kolom → nama kanonik
+NAME_MAP = {
+    # USIAMASUK
+    "usiamasuk": "USIAMASUK",
+    "usia_masuk": "USIAMASUK",
+    "usiamasuktahun": "USIAMASUK",
+    "usiamasukth": "USIAMASUK",
+    "usia": "USIAMASUK",
+    "usia masuk": "USIAMASUK",
+    # IP series
+    "ip2": "IP2", "ipk2": "IP2", "ips2": "IP2",
+    "ip3": "IP3", "ipk3": "IP3", "ips3": "IP3",
+    "ip5": "IP5", "ipk5": "IP5", "ips5": "IP5",
+    # Rata-rata nilai
+    "reratanilai": "rata-rata nilai",
+    "rataratanilai": "rata-rata nilai",
+    "rata2nilai": "rata-rata nilai",
+    "rata-rata": "rata-rata nilai",
+    "avgscore": "rata-rata nilai",
+    "nilaiavg": "rata-rata nilai",
+    "nilai_rerata": "rata-rata nilai",
+    "rerata": "rata-rata nilai",
+    # Jalur
+    "jalur": "mandiri/flagsip",
+    "mandiri/flagsip": "mandiri/flagsip",
+    "mandiriflagsip": "mandiri/flagsip",
+    "mandiriflagship": "mandiri/flagsip",
+    # Bekerja
+    "bekerja": "BEKERJA/TIDAK",
+    "bekerja/tidak": "BEKERJA/TIDAK",
+    "statusbekerja": "BEKERJA/TIDAK",
+    # Target
+    "lulustepat": "LULUS TEPAT/TIDAK",
+    "lulustepattidak": "LULUS TEPAT/TIDAK",
+    "lulus_tepat": "LULUS TEPAT/TIDAK",
+    "lulus": "LULUS TEPAT/TIDAK",
+    "statuslulus": "LULUS TEPAT/TIDAK",
+    "lulustepat/tidak": "LULUS TEPAT/TIDAK",
+}
+
 def harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {}
     for c in df.columns:
@@ -89,18 +128,14 @@ def smart_detect_target(df: pd.DataFrame, target_guess: str = TARGET_NAME):
     candidates = [c for c in df.columns if _norm(c) in {"lulustepattidak", "lulus_tepat", "lulus", "statuslulus"}]
     return candidates[0] if candidates else df.columns[-1]
 
-# --- PERUBAHAN: Pipeline build_pipeline yang dimodifikasi ---
 def build_pipeline(model_name: str, numeric_features, categorical_features, params: dict):
-    # Logika pipeline numerik sekarang kondisional
     if model_name == "Naive Bayes":
-        # Untuk Naive Bayes, kita lakukan diskritisasi (binning)
         n_bins = params.get("n_bins_discretizer", 5)
         numeric_transformer = Pipeline(steps=[
             ("imputer", SimpleImputer(strategy="median")),
             ("discretizer", KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='uniform'))
         ])
     else:
-        # Untuk model lain, kita lakukan scaling seperti biasa
         numeric_transformer = Pipeline(steps=[
             ("imputer", SimpleImputer(strategy="median")),
             ("scaler", StandardScaler())
@@ -124,9 +159,7 @@ def build_pipeline(model_name: str, numeric_features, categorical_features, para
         remainder="drop"
     )
 
-    # Logika pemilihan model sekarang menggunakan CategoricalNB
     if model_name == "Naive Bayes":
-        # Gunakan CategoricalNB karena semua fitur sekarang bersifat diskrit
         model = CategoricalNB(alpha=params.get("alpha", 1.0))
     elif model_name == "Decision Tree":
         model = DecisionTreeClassifier(
@@ -149,7 +182,7 @@ def build_pipeline(model_name: str, numeric_features, categorical_features, para
 
     return Pipeline(steps=[("preprocess", preprocessor), ("model", model)])
 
-# (Fungsi-fungsi plot dan utilitas lainnya tetap sama)
+
 def plot_confusion_matrix(cm, labels):
     fig, ax = plt.subplots(figsize=(4, 3))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False,
@@ -157,6 +190,7 @@ def plot_confusion_matrix(cm, labels):
     ax.set_xlabel("Prediksi")
     ax.set_ylabel("Aktual")
     st.pyplot(fig)
+
 
 def plot_roc_pr(y_true_bin, y_score):
     fpr, tpr, _ = roc_curve(y_true_bin, y_score)
@@ -177,6 +211,7 @@ def plot_roc_pr(y_true_bin, y_score):
     ax2.set_ylabel("Precision")
     ax2.set_title("Precision-Recall Curve")
     st.pyplot(fig2)
+
 
 def to_binary(y_series: pd.Series, positive_value):
     return (y_series == positive_value).astype(int)
@@ -216,24 +251,23 @@ elif model_name == "Decision Tree":
         params["balanced"] = st.sidebar.toggle("class_weight='balanced'", value=True)
     except AttributeError:
         params["balanced"] = st.sidebar.checkbox("class_weight='balanced'", value=True)
-# --- PERUBAHAN: Pengaturan sidebar untuk Naive Bayes yang baru ---
 elif model_name == "Naive Bayes":
     st.sidebar.caption("Pengaturan untuk Categorical Naive Bayes")
     params["n_bins_discretizer"] = st.sidebar.number_input("Jumlah Bins (Diskritisasi)", min_value=2, max_value=15, value=5, step=1, help="Mengubah fitur numerik menjadi beberapa kelompok/kategori.")
     params["alpha"] = st.sidebar.slider("Alpha (smoothing)", 0.0, 2.0, 1.0, 0.1, help="Parameter smoothing untuk mencegah probabilitas nol. Mirip seperti var_smoothing.")
-# --- AKHIR PERUBAHAN ---
 
 st.sidebar.divider()
 st.sidebar.caption("💾 Muat model .joblib (opsional)")
 uploaded_model = st.sidebar.file_uploader("Muat Model (.joblib)", type=["joblib"], accept_multiple_files=False)
 
 # =========================================================
-# MAIN LAYOUT dan TAB-TAB LAINNYA
+# CACHE SEDERHANA: DATAFRAME
 # =========================================================
-# (Tidak ada perubahan pada kode di bawah ini, 
-#  semua logika Tab Data, Pelatihan, Form, Chatbot, dll. tetap sama)
 df_cached = st.session_state.get("df_cached", None)
 
+# =========================================================
+# MAIN LAYOUT
+# =========================================================
 st.title("🎓 Prediksi Kelulusan Tepat Waktu — Skema Fitur Terkunci")
 st.markdown("""
 Fitur dipakai: **USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK**
@@ -250,7 +284,6 @@ except Exception:
     )
 
 with tab_data:
-    # (Kode di dalam tab_data tidak berubah)
     st.subheader("1) Unggah Data (CSV/XLSX/XLS)")
     uploaded_file = st.file_uploader("Pilih file data", type=["csv", "xlsx", "xls"])
     df = None
@@ -324,7 +357,6 @@ with tab_data:
             )
 
 with tab_train:
-    # (Kode di dalam tab_train tidak berubah, karena sudah menggunakan build_pipeline yang baru)
     st.subheader("2) Latih & Evaluasi (Fitur Terkunci)")
     df = st.session_state.get("df_cached", None)
     if df is None:
@@ -490,11 +522,12 @@ with tab_train:
                         "positive": positive_value
                     }
 
-# ... (Sisa kode untuk tab lain tetap sama)
-# Anda bisa copy-paste bagian ini dari kode sebelumnya jika perlu
 with tab_chat:
-    pass # Letakkan kode tab_chat di sini
+    # (Kode sisa tidak berubah)
+    pass
 with tab_form:
-    pass # Letakkan kode tab_form di sini
+    # (Kode sisa tidak berubah)
+    pass
 with tab_about:
-    pass # Letakkan kode tab_about di sini
+    # (Kode sisa tidak berubah)
+    pass
