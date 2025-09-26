@@ -365,7 +365,6 @@ with tab_train:
                     st.download_button("Unduh Model (.joblib)", data=buf.getvalue(), file_name=f"model.joblib", mime="application/octet-stream")
                     st.session_state["last_trained_model"] = {"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}
 
-# --- KODE LENGKAP UNTUK TAB-TAB BERIKUTNYA ---
 REQUIRED_FEATURES = CANON_FEATURES
 FEATURE_PATTERNS = {
     "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
@@ -398,10 +397,13 @@ def predict_and_recommend(pipe, features_dict: dict, positive_value: str):
     pred = pipe.predict(one)[0]
     proba_str = ""
     if hasattr(pipe.named_steps["model"], "predict_proba"):
-        proba = pipe.predict_proba(one)
-        pos_index = list(pipe.classes_).index(positive_value)
-        p_pos = proba[0, pos_index]
-        proba_str = f" (Probabilitas: {p_pos:.2f})"
+        try:
+            proba = pipe.predict_proba(one)
+            pos_index = list(pipe.classes_).index(positive_value)
+            p_pos = proba[0, pos_index]
+            proba_str = f" (Probabilitas: {p_pos:.2f})"
+        except Exception:
+            proba_str = ""
     
     status_bekerja = str(features_dict.get("BEKERJA/TIDAK", "")).upper()
     if pred == positive_value:
@@ -423,7 +425,6 @@ def init_chat_state():
     if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
     if "chat_features" not in st.session_state: st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES}
 
-# --- FUNGSI DIKEMBALIKAN ---
 def chat_system_prompt():
     return (
         "Saya adalah asisten akademik. Berbicaralah santai. "
@@ -450,9 +451,11 @@ with tab_form:
                 IP3 = st.number_input("IP3", 0.0, 4.0, 3.2, 0.01, "%.2f")
                 IP5 = st.number_input("IP5", 0.0, 4.0, 3.2, 0.01, "%.2f")
             with colC:
-                rata_rata = st.slider("rata-rata nilai", 0, 100, 82)
-                jalur = st.selectbox("mandiri/flagsip", ["MANDIRI", "FLAGSIP"])
-                bekerja = st.selectbox("BEKERJA/TIDAK", ["YA", "TIDAK"])
+                # --- PERUBAHAN: Menambahkan tooltip (help) pada slider ---
+                rata_rata = st.slider("rata-rata nilai", 0, 100, 82, help="Hasil pembagian jumlah bobot nilai semester 5 dengan jumlah SKS pada semester 5.")
+            
+            jalur = st.selectbox("mandiri/flagsip", ["MANDIRI", "FLAGSIP"])
+            bekerja = st.selectbox("BEKERJA/TIDAK", ["YA", "TIDAK"])
             submit = st.form_submit_button("🔮 Prediksi")
 
         if submit:
@@ -469,7 +472,7 @@ with tab_form:
                 except Exception:
                     proba_str = " (probabilitas tidak tersedia)"
             st.success(f"**Hasil Prediksi:** **{pred}**{proba_str}")
-            # Tampilkan rekomendasi dinamis
+            # Menampilkan rekomendasi dinamis
             st.markdown(predict_and_recommend(pipe, inputs_form, positive_value).split("\n\n", 1)[1])
 
 with tab_chat:
@@ -482,7 +485,6 @@ with tab_chat:
         pipe = active_model_obj["pipeline"]
         positive_value = active_model_obj["positive"]
         
-        # --- PERBAIKAN: Menampilkan petunjuk chatbot ---
         st.markdown("**Panduan Singkat**: " + chat_system_prompt())
 
         for msg in st.session_state.chat_messages:
@@ -500,7 +502,15 @@ with tab_chat:
                 response = predict_and_recommend(pipe, st.session_state.chat_features, positive_value)
                 st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES} # Reset
             else:
-                response = f"Data belum lengkap. Mohon lengkapi: {', '.join(missing)}"
+                # --- PERUBAHAN: Menambahkan detail pada pesan permintaan data ---
+                ask_parts = []
+                for m in missing:
+                    if m == "USIAMASUK": ask_parts.append("USIAMASUK (angka, tahun)")
+                    elif m in {"IP2", "IP3", "IP5"}: ask_parts.append(f"{m} (0.00 - 4.00)")
+                    elif m == "rata-rata nilai": ask_parts.append("rata-rata nilai (0-100, total bobot nilai semester 5 dibagi SKS)")
+                    elif m == "mandiri/flagsip": ask_parts.append("jalur: MANDIRI / FLAGSIP")
+                    elif m == "BEKERJA/TIDAK": ask_parts.append("status kerja: YA / TIDAK")
+                response = f"Data belum lengkap. Mohon lengkapi: {', '.join(ask_parts)}"
 
             with st.chat_message("assistant"):
                 st.markdown(response)
