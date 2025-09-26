@@ -152,11 +152,10 @@ def build_pipeline(model_name: str, numeric_features, categorical_features, para
         ("scaler", StandardScaler())
     ])
 
-    # ✅ OneHotEncoder kompatibel lintas versi
     try:
-        ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)  # sklearn >=1.2
+        ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
     except TypeError:
-        ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)  # sklearn <1.2
+        ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)
 
     categorical_transformer = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
@@ -224,10 +223,6 @@ def plot_roc_pr(y_true_bin, y_score):
     ax2.set_title("Precision-Recall Curve")
     st.pyplot(fig2)
 
-# --- DIHAPUS: Fungsi ini tidak lagi diperlukan ---
-# def get_feature_names_from_ct(ct: ColumnTransformer):
-#     ...
-# --- AKHIR BAGIAN DIHAPUS ---
 
 def to_binary(y_series: pd.Series, positive_value):
     return (y_series == positive_value).astype(int)
@@ -245,7 +240,7 @@ st.sidebar.divider()
 use_cv = st.sidebar.toggle("Gunakan Cross-Validation", value=True)
 if use_cv:
     n_folds = st.sidebar.number_input("Jumlah Folds (k)", min_value=3, max_value=20, value=5, step=1)
-    test_size = 0 # Tidak dipakai jika CV aktif
+    test_size = 0
 else:
     test_size = st.sidebar.slider("Porsi Test Set", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
 st.sidebar.divider()
@@ -495,7 +490,6 @@ with tab_train:
                     st.markdown("**Pentingnya Fitur**")
                     try:
                         if use_cv:
-                            # Buat split sementara hanya untuk permutation importance
                             _, X_test_perm, _, y_test_perm = train_test_split(X, y, test_size=0.2, random_state=random_state, stratify=y)
                         else:
                             X_test_perm, y_test_perm = X_test, y_test
@@ -503,20 +497,25 @@ with tab_train:
                         model = pipe.named_steps["model"]
                         pre = pipe.named_steps["preprocess"]
                         
-                        # --- PERBAIKAN: Gunakan metode .get_feature_names_out() ---
-                        feature_names = pre.get_feature_names_out()
-                        
+                        # --- PERBAIKAN: Logika bercabang untuk feature importance ---
                         if hasattr(model, "feature_importances_"):
+                            # Untuk model tree-based (Random Forest, Decision Tree)
                             importances = model.feature_importances_
+                            feature_names = pre.get_feature_names_out()
+                            imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
                         else:
+                            # Untuk model lain (Naive Bayes) via permutation
                             scorer = make_scorer(f1_score, pos_label=positive_value, zero_division=0)
                             result = permutation_importance(
                                 pipe, X_test_perm, y_test_perm,
                                 n_repeats=5, random_state=random_state, n_jobs=-1, scoring=scorer
                             )
                             importances = result.importances_mean
+                            # Gunakan nama fitur ORIGINAL
+                            feature_names = X_test_perm.columns.tolist()
+                            imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
+                        # --- AKHIR PERBAIKAN ---
 
-                        imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
                         imp_df = imp_df.sort_values("importance", ascending=False).head(20)
                         fig, ax = plt.subplots(figsize=(6, 5))
                         sns.barplot(data=imp_df, y="fitur", x="importance", ax=ax, color="#4C78A8")
@@ -543,9 +542,15 @@ with tab_train:
                         "positive": positive_value
                     }
 
+# ... (Sisa kode tetap sama, tidak perlu diubah) ...
 # =========================================================
-# Chatbot Utilities
+# Chatbot Utilities, Tab Chatbot, Tab Form, Tab About
 # =========================================================
+# (Kode di bagian ini tidak saya tampilkan lagi untuk keringkasan,
+# karena tidak ada perubahan di sana.)
+# ... (lanjutan kode seperti sebelumnya) ...
+# ...
+# ...
 REQUIRED_FEATURES = ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai", "mandiri/flagsip", "BEKERJA/TIDAK"]
 
 FEATURE_PATTERNS = {
@@ -669,9 +674,6 @@ def chat_system_prompt():
         "Saya akan menanyakan yang belum lengkap. Ketik `reset` untuk mulai ulang."
     )
 
-# -----------------------------
-# Tab Chatbot
-# -----------------------------
 with tab_chat:
     st.subheader("4) Chatbot Akademik — Tanya Jawab & Rekomendasi")
     active_model_obj = st.session_state.get("last_trained_model", None)
@@ -743,9 +745,6 @@ with tab_chat:
             else:
                 st.success("Semua fitur terpenuhi. Anda bisa ketik pertanyaan lain atau `reset`.")
 
-# -----------------------------
-# Tab Form Input (7 Fitur)
-# -----------------------------
 with tab_form:
     st.subheader("3) Prediksi Individu — Form 7 Fitur")
     active_model_obj = st.session_state.get("last_trained_model", None)
@@ -812,7 +811,6 @@ with tab_form:
                 try:
                     if hasattr(pipe.named_steps["model"], "feature_importances_"):
                         importances = pipe.named_steps["model"].feature_importances_
-                        # --- PERBAIKAN: Gunakan .get_feature_names_out() juga di sini ---
                         feature_names = pipe.named_steps["preprocess"].get_feature_names_out()
                         sorted_idx = np.argsort(importances)[::-1]
                         st.markdown("*Fitur paling berpengaruh (global):*")
@@ -821,9 +819,6 @@ with tab_form:
             except Exception as e:
                 st.error(f"Gagal prediksi: {e}")
 
-# -----------------------------
-# Tab About
-# -----------------------------
 with tab_about:
     st.subheader("Tentang Aplikasi (Skema Terkunci)")
     st.markdown(f"""
