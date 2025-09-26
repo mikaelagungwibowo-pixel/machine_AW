@@ -366,12 +366,13 @@ with tab_train:
                     st.session_state["last_trained_model"] = {"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}
 
 REQUIRED_FEATURES = CANON_FEATURES
+# --- PERUBAHAN: Regex untuk rata-rata nilai diubah untuk menerima desimal ---
 FEATURE_PATTERNS = {
     "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
     "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
     "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
     "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
-    "rata-rata nilai": re.compile(r"(rata[- ]?rata\s*nilai|nilai\s*rata[- ]?rata|rerata)\s*[:=]?\s*(\d{1,3})", re.I),
+    "rata-rata nilai": re.compile(r"(rata[- ]?rata\s*nilai|nilai\s*rata[- ]?rata|rerata)\s*[:=]?\s*(\d{1,2}(?:[.,]\d{1,2})?)", re.I),
 }
 
 def extract_features_from_text(text: str, current: dict) -> dict:
@@ -381,8 +382,11 @@ def extract_features_from_text(text: str, current: dict) -> dict:
         m = pat.search(t)
         if m:
             val = m.group(m.lastindex).replace(',', '.')
-            if key in {"rata-rata nilai", "USIAMASUK"}: out[key] = int(float(val))
-            else: out[key] = float(val)
+            # --- PERUBAHAN: rata-rata nilai sekarang diperlakukan sebagai float ---
+            if key in {"USIAMASUK"}:
+                out[key] = int(float(val))
+            else:
+                out[key] = float(val)
     if re.search(r"\bmandiri\b", t, re.I): out["mandiri/flagsip"] = "MANDIRI"
     if re.search(r"\bflag(ship|sip)\b", t, re.I): out["mandiri/flagsip"] = "FLAGSIP"
     if re.search(r"\b(tidak\s*(bekerja|kerja)|nggak\s*kerja)\b", t, re.I): out["BEKERJA/TIDAK"] = "TIDAK"
@@ -401,7 +405,7 @@ def chat_system_prompt():
         "Saya adalah asisten akademik. Berbicaralah santai. "
         "Saya dapat membantu prediksi kelulusan tepat waktu menggunakan 7 fitur: "
         "USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK. "
-        "Ketik data Anda, misalnya: `usia=19 ip2=3.2 ip3=3.1 ip5=3.4 rerata=82 jalur=mandiri bekerja=tidak`. "
+        "Ketik data Anda, misalnya: `usia=19 ip2=3.2 ip3=3.1 ip5=3.4 rerata=13.5 jalur=mandiri bekerja=tidak`. "
         "Saya akan menanyakan yang belum lengkap. Ketik `reset` untuk mulai ulang."
     )
 
@@ -422,7 +426,9 @@ with tab_form:
                 IP3 = st.number_input("IP3", 0.0, 4.0, 3.2, 0.01, "%.2f")
                 IP5 = st.number_input("IP5", 0.0, 4.0, 3.2, 0.01, "%.2f")
             with colC:
-                rata_rata = st.slider("rata-rata nilai", 0, 100, 82, help="Hasil pembagian jumlah bobot nilai semester 5 dengan jumlah SKS pada semester 5.")
+                # --- PERUBAHAN: Mengganti slider menjadi number_input untuk desimal ---
+                rata_rata = st.number_input("rata-rata nilai", min_value=0.0, max_value=16.0, value=13.0, step=0.01, format="%.2f", help="Hasil pembagian jumlah bobot nilai semester 5 dengan jumlah SKS pada semester 5.")
+            
             jalur = st.selectbox("mandiri/flagsip", ["MANDIRI", "FLAGSIP"])
             bekerja = st.selectbox("BEKERJA/TIDAK", ["YA", "TIDAK"])
             submit = st.form_submit_button("🔮 Prediksi")
@@ -431,11 +437,7 @@ with tab_form:
             inputs_form = {"USIAMASUK": USIAMASUK, "IP2": IP2, "IP3": IP3, "IP5": IP5, "rata-rata nilai": rata_rata, "mandiri/flagsip": jalur, "BEKERJA/TIDAK": bekerja}
             X_one = pd.DataFrame([inputs_form])
             
-            # --- PERBAIKAN: Logika prediksi dan rekomendasi disatukan ---
-            # 1. Lakukan prediksi satu kali
             pred = pipe.predict(X_one)[0]
-            
-            # 2. Hitung probabilitas (jika tersedia)
             proba_str = ""
             if hasattr(pipe.named_steps["model"], "predict_proba"):
                 try:
@@ -446,10 +448,8 @@ with tab_form:
                 except Exception:
                     proba_str = " (probabilitas tidak tersedia)"
 
-            # 3. Tampilkan hasil prediksi utama
             st.success(f"**Hasil Prediksi:** **{pred}**{proba_str}")
 
-            # 4. Bangun dan tampilkan rekomendasi berdasarkan hasil prediksi
             status_bekerja = str(inputs_form.get("BEKERJA/TIDAK", "")).upper()
             if pred == positive_value:
                 header = "🎉 *Selamat! Anda diprediksi lulus tepat waktu.*"
@@ -465,7 +465,6 @@ with tab_form:
                 else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
                 rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
                 st.warning(header + "\n" + "\n".join(rekomendasi))
-            # --- AKHIR PERBAIKAN ---
 
 with tab_chat:
     st.subheader("4) Chatbot Akademik — Tanya Jawab & Rekomendasi")
@@ -491,7 +490,6 @@ with tab_chat:
             missing = missing_features(st.session_state.chat_features)
             
             if not missing:
-                # --- PERBAIKAN: Logika chatbot juga disatukan ---
                 features_dict = st.session_state.chat_features
                 one = pd.DataFrame([features_dict])
                 pred = pipe.predict(one)[0]
@@ -527,7 +525,8 @@ with tab_chat:
                 for m in missing:
                     if m == "USIAMASUK": ask_parts.append("USIAMASUK (angka, tahun)")
                     elif m in {"IP2", "IP3", "IP5"}: ask_parts.append(f"{m} (0.00 - 4.00)")
-                    elif m == "rata-rata nilai": ask_parts.append("rata-rata nilai (0-100, total bobot nilai semester 5 dibagi SKS)")
+                    # --- PERUBAHAN: Memperbarui petunjuk di chatbot ---
+                    elif m == "rata-rata nilai": ask_parts.append("rata-rata nilai (0.00 - 16.00, dari total bobot nilai semester 5 dibagi SKS)")
                     elif m == "mandiri/flagsip": ask_parts.append("jalur: MANDIRI / FLAGSIP")
                     elif m == "BEKERJA/TIDAK": ask_parts.append("status kerja: YA / TIDAK")
                 response = f"Data belum lengkap. Mohon lengkapi: {', '.join(ask_parts)}"
