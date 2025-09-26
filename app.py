@@ -1,7 +1,6 @@
 # app.py
 from io import BytesIO
 import io
-import os
 import re
 import numpy as np
 import pandas as pd
@@ -29,8 +28,11 @@ import joblib
 # KONFIGURASI SKEMA TERKUNCI
 # =========================================================
 CANON_FEATURES = [
-    "USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai",
-    "mandiri/flagsip", "BEKERJA/TIDAK",
+    "USIAMASUK",
+    "IP2", "IP3", "IP5",
+    "rata-rata nilai",
+    "mandiri/flagsip",
+    "BEKERJA/TIDAK",
 ]
 TARGET_NAME = "LULUS TEPAT/TIDAK"
 
@@ -38,50 +40,36 @@ TARGET_NAME = "LULUS TEPAT/TIDAK"
 # KONFIGURASI HALAMAN
 # =========================================================
 st.set_page_config(
-    page_title="Prediksi Kelulusan Tepat Waktu",
+    page_title="Prediksi Kelulusan Tepat Waktu — Skema Terkunci",
     layout="wide",
     page_icon="🎓"
 )
 st.sidebar.caption(f"scikit-learn version: {sklearn.__version__}")
 
 # =========================================================
-# FUNGSI-FUNGSI UTAMA
+# UTILITAS & HARMONISASI KOLUMN
 # =========================================================
-@st.cache_resource
-def load_default_model():
-    """Memuat model default dari file 'model.joblib' dengan pesan debug."""
-    model_path = 'model.joblib'
-    
-    # Pesan debug untuk pengguna
-    st.sidebar.warning(f"Mencoba memuat model default dari path: `{os.path.abspath(model_path)}`")
-    
-    if os.path.exists(model_path):
-        st.sidebar.success("✅ File `model.joblib` ditemukan.")
-        try:
-            model_obj = joblib.load(model_path)
-            return model_obj
-        except Exception as e:
-            st.sidebar.error(f"Gagal memuat file model: {e}")
-            return None
-    else:
-        st.sidebar.error("❌ File `model.joblib` TIDAK ditemukan di folder yang sama dengan `app.py`.")
-        return None
-
 def _norm(s: str) -> str:
     return str(s).strip().lower().replace("_", "").replace("-", "").replace(" ", "")
 
 NAME_MAP = {
-    "usiamasuk": "USIAMASUK", "usia_masuk": "USIAMASUK", "usia": "USIAMASUK",
-    "ip2": "IP2", "ipk2": "IP2", "ips2": "IP2", "ip3": "IP3", "ipk3": "IP3", "ips3": "IP3",
+    "usiamasuk": "USIAMASUK", "usia_masuk": "USIAMASUK", "usiamasuktahun": "USIAMASUK",
+    "usiamasukth": "USIAMASUK", "usia": "USIAMASUK", "usia masuk": "USIAMASUK",
+    "ip2": "IP2", "ipk2": "IP2", "ips2": "IP2",
+    "ip3": "IP3", "ipk3": "IP3", "ips3": "IP3",
     "ip5": "IP5", "ipk5": "IP5", "ips5": "IP5",
-    "reratanilai": "rata-rata nilai", "rataratanilai": "rata-rata nilai", "rerata": "rata-rata nilai",
-    "jalur": "mandiri/flagsip",
-    "bekerja": "BEKERJA/TIDAK", "bekerja/tidak": "BEKERJA/TIDAK",
-    "lulustepat": "LULUS TEPAT/TIDAK", "lulus_tepat": "LULUS TEPAT/TIDAK", "lulus": "LULUS TEPAT/TIDAK",
+    "reratanilai": "rata-rata nilai", "rataratanilai": "rata-rata nilai", "rata2nilai": "rata-rata nilai",
+    "rata-rata": "rata-rata nilai", "avgscore": "rata-rata nilai", "nilaiavg": "rata-rata nilai",
+    "nilai_rerata": "rata-rata nilai", "rerata": "rata-rata nilai",
+    "jalur": "mandiri/flagsip", "mandiri/flagsip": "mandiri/flagsip", "mandiriflagsip": "mandiri/flagsip",
+    "mandiriflagship": "mandiri/flagsip",
+    "bekerja": "BEKERJA/TIDAK", "bekerja/tidak": "BEKERJA/TIDAK", "statusbekerja": "BEKERJA/TIDAK",
+    "lulustepat": "LULUS TEPAT/TIDAK", "lulustepattidak": "LULUS TEPAT/TIDAK",
+    "lulus_tepat": "LULUS TEPAT/TIDAK", "lulus": "LULUS TEPAT/TIDAK",
+    "statuslulus": "LULUS TEPAT/TIDAK", "lulustepat/tidak": "LULUS TEPAT/TIDAK",
 }
 
 def harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    # (Fungsi ini tidak diubah, sama seperti sebelumnya)
     rename_map = {}
     for c in df.columns:
         key = _norm(c)
@@ -90,20 +78,32 @@ def harmonize_columns(df: pd.DataFrame) -> pd.DataFrame:
     if rename_map:
         df = df.rename(columns=rename_map)
     if "mandiri/flagsip" in df.columns:
-        df["mandiri/flagsip"] = df["mandiri/flagsip"].str.strip().str.upper().replace("FLAGSHIP", "FLAGSIP")
+        def norm_jalur(v):
+            if pd.isna(v): return v
+            s = str(v).strip().upper()
+            if s == "FLAGSHIP": s = "FLAGSIP"
+            return s
+        df["mandiri/flagsip"] = df["mandiri/flagsip"].apply(norm_jalur)
     if "BEKERJA/TIDAK" in df.columns:
-        df["BEKERJA/TIDAK"] = df["BEKERJA/TIDAK"].str.strip().str.lower().replace(
-            {"1": "YA", "y": "YA", "true": "YA", "bekerja": "YA",
-             "0": "TIDAK", "t": "TIDAK", "false": "TIDAK", "tidak bekerja": "TIDAK"}
-        ).str.upper()
+        def norm_bin_work(v):
+            if pd.isna(v): return v
+            s = str(v).strip().lower()
+            if s in {"1", "ya", "y", "true", "bekerja"}: return "YA"
+            if s in {"0", "tidak", "tdk", "t", "false", "tidak bekerja"}: return "TIDAK"
+            return str(v).upper()
+        df["BEKERJA/TIDAK"] = df["BEKERJA/TIDAK"].apply(norm_bin_work)
     for col in ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai"]:
         if col in df.columns:
             if df[col].dtype == "object":
-                df[col] = df[col].astype(str).str.strip().str.replace(",", ".", regex=False)
+                df[col] = (df[col].astype(str).str.strip().str.replace(",", ".", regex=False))
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
-# ... (Fungsi build_pipeline, plot, dll. tetap sama seperti sebelumnya)
+def smart_detect_target(df: pd.DataFrame, target_guess: str = TARGET_NAME):
+    if TARGET_NAME in df.columns: return TARGET_NAME
+    candidates = [c for c in df.columns if _norm(c) in {"lulustepattidak", "lulus_tepat", "lulus", "statuslulus"}]
+    return candidates[0] if candidates else df.columns[-1]
+
 def build_pipeline(model_name: str, numeric_features, categorical_features, params: dict):
     if model_name == "Naive Bayes":
         n_bins = params.get("n_bins_discretizer", 5)
@@ -160,20 +160,31 @@ def plot_confusion_matrix(cm, labels):
     ax.set_xlabel("Prediksi")
     ax.set_ylabel("Aktual")
     st.pyplot(fig)
-    
+
+def plot_roc_pr(y_true_bin, y_score):
+    fpr, tpr, _ = roc_curve(y_true_bin, y_score)
+    roc_auc = roc_auc_score(y_true_bin, y_score)
+    fig1, ax1 = plt.subplots(figsize=(4, 3))
+    ax1.plot(fpr, tpr, label=f"ROC AUC = {roc_auc:.3f}")
+    ax1.plot([0, 1], [0, 1], "k--", alpha=0.5)
+    ax1.set_xlabel("False Positive Rate")
+    ax1.set_ylabel("True Positive Rate")
+    ax1.set_title("ROC Curve")
+    ax1.legend(loc="lower right")
+    st.pyplot(fig1)
+    precision, recall, _ = precision_recall_curve(y_true_bin, y_score)
+    fig2, ax2 = plt.subplots(figsize=(4, 3))
+    ax2.plot(recall, precision)
+    ax2.set_xlabel("Recall")
+    ax2.set_ylabel("Precision")
+    ax2.set_title("Precision-Recall Curve")
+    st.pyplot(fig2)
+
 def to_binary(y_series: pd.Series, positive_value):
     return (y_series == positive_value).astype(int)
 
-# =========================================================
-# INISIALISASI & SIDEBAR
-# =========================================================
-if "active_model_obj" not in st.session_state:
-    st.session_state.active_model_obj = load_default_model()
-    st.session_state.model_source = "Default" if st.session_state.active_model_obj else "None"
-
 st.sidebar.title("⚙️ Pengaturan")
 st.sidebar.caption("Model & parameter pelatihan")
-# ... (sisa kode sidebar tidak berubah)
 model_name = st.sidebar.selectbox(
     "Pilih Model", ["Random Forest", "Decision Tree", "Naive Bayes"], index=0
 )
@@ -181,6 +192,7 @@ st.sidebar.divider()
 use_cv = st.sidebar.toggle("Gunakan Cross-Validation", value=True)
 if use_cv:
     n_folds = st.sidebar.number_input("Jumlah Folds (k)", min_value=3, max_value=20, value=5, step=1)
+    test_size = 0
 else:
     test_size = st.sidebar.slider("Porsi Test Set", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
 st.sidebar.divider()
@@ -206,26 +218,12 @@ elif model_name == "Naive Bayes":
     params["n_bins_discretizer"] = st.sidebar.number_input("Jumlah Bins (Diskritisasi)", min_value=2, max_value=15, value=5, step=1, help="Mengubah fitur numerik menjadi beberapa kelompok/kategori.")
     params["alpha"] = st.sidebar.slider("Alpha (smoothing)", 0.0, 2.0, 1.0, 0.1, help="Parameter smoothing untuk mencegah probabilitas nol.")
 st.sidebar.divider()
-st.sidebar.caption("💾 Ganti Model Aktif")
-uploaded_model = st.sidebar.file_uploader("Unggah Model (.joblib)", type=["joblib"], accept_multiple_files=False)
-if uploaded_model is not None:
-    try:
-        model_obj = joblib.load(uploaded_model)
-        st.session_state.active_model_obj = model_obj
-        st.session_state.model_source = "Unggahan"
-        st.sidebar.success("Model dari file unggahan berhasil dimuat dan sekarang aktif.")
-    except Exception as e:
-        st.sidebar.error(f"Gagal memuat model: {e}")
+st.sidebar.caption("💾 Muat model .joblib (opsional)")
+uploaded_model = st.sidebar.file_uploader("Muat Model (.joblib)", type=["joblib"], accept_multiple_files=False)
 
-# =========================================================
-# MAIN LAYOUT
-# =========================================================
+df_cached = st.session_state.get("df_cached", None)
+
 st.title("🎓 Prediksi Kelulusan Tepat Waktu — Skema Fitur Terkunci")
-
-# --- PERBAIKAN: Menampilkan pesan status model yang lebih jelas di halaman utama ---
-if st.session_state.model_source == "None":
-    st.warning("⚠️ **Model default tidak aktif.** Aplikasi ini dapat digunakan setelah Anda meletakkan file `model.joblib` di folder yang benar, atau setelah Anda melatih model baru dari data di tab 'Pelatihan & Evaluasi'.", icon="⚠️")
-
 st.markdown("""
 Fitur dipakai: **USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK**
 Target (label): **LULUS TEPAT/TIDAK**
@@ -240,67 +238,304 @@ except Exception:
         ["Data", "Pelatihan & Evaluasi", "Form Input (7 Fitur)", "Chatbot", "Tentang"]
     )
 
-# ... (Seluruh kode di dalam tab-tab (tab_data, tab_train, tab_form, tab_chat, tab_about)
-#      tetap sama seperti versi fungsional terakhir, tidak perlu diubah)
-
 with tab_data:
     st.subheader("1) Unggah Data (CSV/XLSX/XLS)")
     uploaded_file = st.file_uploader("Pilih file data", type=["csv", "xlsx", "xls"])
-    df = None # Mulai dengan df kosong
+    df = None
     if uploaded_file is not None:
+        name = uploaded_file.name.lower()
         try:
-            if uploaded_file.name.lower().endswith('.csv'):
+            if name.endswith(".csv"):
                 df = pd.read_csv(uploaded_file)
             else:
                 df = pd.read_excel(uploaded_file)
             st.success(f"File dimuat: {df.shape[0]} baris, {df.shape[1]} kolom.")
-            df = harmonize_columns(df)
-            st.session_state.df_cached = df # Simpan ke session state
         except Exception as e:
             st.error(f"Gagal memuat file: {e}")
-            st.session_state.df_cached = None
-    
-    # Selalu ambil df dari cache untuk ditampilkan
-    df_to_show = st.session_state.get("df_cached", None)
-    if df_to_show is not None:
-        st.markdown("**Data (20 baris pertama):**")
-        st.dataframe(df_to_show.head(20), use_container_width=True)
-        # ... (sisa expander)
+            df = None
     else:
-        st.info("Belum ada data yang diunggah.")
-
+        df = df_cached
+    if df is not None:
+        df = harmonize_columns(df)
+        st.session_state["df_cached"] = df
+        st.markdown("**Data (20 baris pertama):**")
+        st.dataframe(df.head(20), use_container_width=True)
+        with st.expander("🔎 Pemeriksaan Skema"):
+            must_have = CANON_FEATURES + [TARGET_NAME]
+            present = [c for c in must_have if c in df.columns]
+            missing = [c for c in must_have if c not in df.columns]
+            st.write("Kolom ditemukan:", present)
+            if missing:
+                st.warning(f"Kolom belum ada: {missing}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Tipe Data**")
+                st.write(df.dtypes)
+            with col2:
+                st.markdown("**Missing Value per Kolom**")
+                st.write(df.isna().sum())
+    else:
+        st.info("Belum ada file diunggah.")
 
 with tab_train:
     st.subheader("2) Latih & Evaluasi (Fitur Terkunci)")
-    df = st.session_state.get("df_cached", None) # Ambil dari session state
     if df is None:
-        st.warning("Unggah data di tab **Data** untuk melatih model baru.")
+        st.warning("Unggah data terlebih dahulu di tab **Data**.")
     else:
-        # ... (sisa kode tab_train lengkap)
-        pass # Placeholder untuk keringkasan, kode aslinya lengkap
+        target_col = smart_detect_target(df, TARGET_NAME)
+        if target_col not in df.columns:
+            st.error(f"Target **{TARGET_NAME}** tidak ditemukan.")
+        else:
+            locked_features = [c for c in CANON_FEATURES if c in df.columns]
+            if not locked_features:
+                st.error("Tidak ada fitur terkunci yang ditemukan.")
+            else:
+                st.success(f"Fitur dipakai: {locked_features}")
+                numeric_features = [c for c in locked_features if df[c].dtype in ['int64', 'float64']]
+                categorical_features = [c for c in locked_features if df[c].dtype == 'object']
+                unique_target_vals = sorted(df[target_col].dropna().unique().tolist())
+                default_positive = "TEPAT" if "TEPAT" in unique_target_vals else unique_target_vals[0]
+                positive_value = st.selectbox("Nilai target positif", options=unique_target_vals, index=unique_target_vals.index(default_positive))
 
+                if st.button("🚀 Latih Model Sekarang", type="primary", use_container_width=True):
+                    X = df[locked_features]
+                    y = df[target_col]
+                    pipe = build_pipeline(model_name, numeric_features, categorical_features, params)
+                    if use_cv:
+                        st.info(f"Cross-Validation Aktif ({n_folds} folds)")
+                        scoring_metrics = {'accuracy': 'accuracy', 'precision': make_scorer(precision_score, pos_label=positive_value, average='binary', zero_division=0), 'recall': make_scorer(recall_score, pos_label=positive_value, average='binary', zero_division=0), 'f1': make_scorer(f1_score, pos_label=positive_value, average='binary', zero_division=0)}
+                        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
+                        scores = cross_validate(pipe, X, y, cv=skf, scoring=scoring_metrics, n_jobs=-1)
+                        st.subheader(f"Hasil Rata-rata Cross-Validation ({n_folds} folds)")
+                        results_df = pd.DataFrame({"Metrik": ["Accuracy", "Precision", "Recall", "F1-Score"], "Rata-rata": [scores['test_accuracy'].mean(), scores['test_precision'].mean(), scores['test_recall'].mean(), scores['test_f1'].mean()], "Standar Deviasi": [scores['test_accuracy'].std(), scores['test_precision'].std(), scores['test_recall'].std(), scores['test_f1'].std()]})
+                        st.dataframe(results_df.style.format({"Rata-rata": "{:.3f}", "Standar Deviasi": "±{:.3f}"}), use_container_width=True)
+                        st.info("Model final dilatih pada seluruh dataset.")
+                        pipe.fit(X, y)
+                    else:
+                        st.info("Mode Pelatihan: Train-Test Split")
+                        y_bin = to_binary(y, positive_value)
+                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y_bin if len(np.unique(y_bin)) == 2 else None)
+                        pipe.fit(X_train, y_train)
+                        y_pred = pipe.predict(X_test)
+                        acc = accuracy_score(y_test, y_pred)
+                        prec, rec, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="binary", pos_label=positive_value, zero_division=0)
+                        st.success(f"**Evaluasi (Test Set)** — Accuracy: **{acc:.3f}** Precision: **{prec:.3f}** Recall: **{rec:.3f}** F1: **{f1:.3f}**")
+                        st.text("Classification Report:")
+                        st.code(classification_report(y_test, y_pred, zero_division=0))
+                        y_test_bin = to_binary(y_test, positive_value)
+                        cm = confusion_matrix(y_test, y_pred)
+                        st.markdown("**Confusion Matrix**")
+                        plot_confusion_matrix(cm, labels=pipe.classes_)
+                        if hasattr(pipe.named_steps["model"], "predict_proba"):
+                            pos_index = list(pipe.classes_).index(positive_value)
+                            y_score = pipe.predict_proba(X_test)[:, pos_index]
+                            st.markdown("**ROC & PR Curve**")
+                            plot_roc_pr(y_test_bin, y_score)
+                    
+                    st.markdown("**Pentingnya Fitur**")
+                    try:
+                        if use_cv:
+                            _, X_test_perm, _, y_test_perm = train_test_split(X, y, test_size=0.2, random_state=random_state, stratify=y)
+                        else:
+                            X_test_perm, y_test_perm = X_test, y_test
+                        model = pipe.named_steps["model"]
+                        pre = pipe.named_steps["preprocess"]
+                        if hasattr(model, "feature_importances_"):
+                            importances = model.feature_importances_
+                            feature_names = pre.get_feature_names_out()
+                            imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
+                        else:
+                            scorer = make_scorer(f1_score, pos_label=positive_value, zero_division=0)
+                            result = permutation_importance(pipe, X_test_perm, y_test_perm, n_repeats=5, random_state=random_state, n_jobs=-1, scoring=scorer)
+                            importances = result.importances_mean
+                            feature_names = X_test_perm.columns.tolist()
+                            imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
+                        imp_df = imp_df.sort_values("importance", ascending=False).head(20)
+                        fig, ax = plt.subplots(figsize=(6, 5))
+                        sns.barplot(data=imp_df, y="fitur", x="importance", ax=ax, color="#4C78A8")
+                        ax.set_title("20 Fitur Teratas")
+                        st.pyplot(fig)
+                    except Exception as e:
+                        st.warning(f"Gagal menghitung importance: {e}")
+
+                    st.markdown("**💾 Simpan Model**")
+                    buf = io.BytesIO()
+                    joblib.dump({"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}, buf)
+                    buf.seek(0)
+                    st.download_button("Unduh Model (.joblib)", data=buf.getvalue(), file_name=f"model.joblib", mime="application/octet-stream")
+                    st.session_state["last_trained_model"] = {"pipeline": pipe, "features": locked_features, "target": target_col, "positive": positive_value}
+
+REQUIRED_FEATURES = CANON_FEATURES
+FEATURE_PATTERNS = {
+    "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
+    "IP2": re.compile(r"\bip(?:k|s)?\s*2\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
+    "IP3": re.compile(r"\bip(?:k|s)?\s*3\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
+    "IP5": re.compile(r"\bip(?:k|s)?\s*5\b\s*[:=]?\s*([0-4](?:[.,]\d{1,2})?)", re.I),
+    "rata-rata nilai": re.compile(r"(rata[- ]?rata\s*nilai|nilai\s*rata[- ]?rata|rerata)\s*[:=]?\s*(\d{1,2}(?:[.,]\d{1,2})?)", re.I),
+}
+
+def extract_features_from_text(text: str, current: dict) -> dict:
+    t = text.strip()
+    out = dict(current)
+    for key, pat in FEATURE_PATTERNS.items():
+        m = pat.search(t)
+        if m:
+            val = m.group(m.lastindex).replace(',', '.')
+            if key in {"USIAMASUK"}:
+                out[key] = int(float(val))
+            else:
+                out[key] = float(val)
+    if re.search(r"\bmandiri\b", t, re.I): out["mandiri/flagsip"] = "MANDIRI"
+    if re.search(r"\bflag(ship|sip)\b", t, re.I): out["mandiri/flagsip"] = "FLAGSIP"
+    if re.search(r"\b(tidak\s*(bekerja|kerja)|nggak\s*kerja)\b", t, re.I): out["BEKERJA/TIDAK"] = "TIDAK"
+    elif re.search(r"\b(bekerja|kerja)\b", t, re.I): out["BEKERJA/TIDAK"] = "YA"
+    return out
+
+def missing_features(feat: dict):
+    return [f for f in REQUIRED_FEATURES if feat.get(f) is None]
+
+def init_chat_state():
+    if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
+    if "chat_features" not in st.session_state: st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES}
+
+def chat_system_prompt():
+    return (
+        "Saya adalah asisten akademik. Berbicaralah santai. "
+        "Saya dapat membantu prediksi kelulusan tepat waktu menggunakan 7 fitur: "
+        "USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK. "
+        "Ketik data Anda, misalnya: `usia=19 ip2=3.2 ip3=3.1 ip5=3.4 rerata=13.5 jalur=mandiri bekerja=tidak`. "
+        "Saya akan menanyakan yang belum lengkap. Ketik `reset` untuk mulai ulang."
+    )
 
 with tab_form:
     st.subheader("3) Prediksi Individu — Form 7 Fitur")
-    active_model_obj = st.session_state.get("active_model_obj", None)
-    if not active_model_obj:
-        st.error("⛔ Tidak ada model yang aktif untuk prediksi.")
+    active_model_obj = st.session_state.get("last_trained_model", None)
+    if active_model_obj is None:
+        st.warning("Latih model di tab 'Pelatihan & Evaluasi' atau muat file .joblib terlebih dahulu.")
     else:
-        # ... (sisa kode tab_form lengkap)
-        pass # Placeholder
+        pipe = active_model_obj["pipeline"]
+        positive_value = active_model_obj["positive"]
+        with st.form("form7"):
+            colA, colB, colC = st.columns(3)
+            with colA:
+                USIAMASUK = st.number_input("USIAMASUK (tahun)", 15, 60, 19)
+                IP2 = st.number_input("IP2", 0.0, 4.0, 3.2, 0.01, "%.2f")
+            with colB:
+                IP3 = st.number_input("IP3", 0.0, 4.0, 3.2, 0.01, "%.2f")
+                IP5 = st.number_input("IP5", 0.0, 4.0, 3.2, 0.01, "%.2f")
+            with colC:
+                rata_rata = st.number_input("rata-rata nilai", min_value=0.0, max_value=16.0, value=13.0, step=0.01, format="%.2f", help="Hasil pembagian jumlah bobot nilai semester 5 dengan jumlah SKS pada semester 5.")
+            jalur = st.selectbox("mandiri/flagsip", ["MANDIRI", "FLAGSIP"])
+            bekerja = st.selectbox("BEKERJA/TIDAK", ["YA", "TIDAK"])
+            submit = st.form_submit_button("🔮 Prediksi")
+
+        if submit:
+            inputs_form = {"USIAMASUK": USIAMASUK, "IP2": IP2, "IP3": IP3, "IP5": IP5, "rata-rata nilai": rata_rata, "mandiri/flagsip": jalur, "BEKERJA/TIDAK": bekerja}
+            X_one = pd.DataFrame([inputs_form])
+            
+            pred = pipe.predict(X_one)[0]
+            proba_str = ""
+            if hasattr(pipe.named_steps["model"], "predict_proba"):
+                try:
+                    proba = pipe.predict_proba(X_one)
+                    pos_index = list(pipe.classes_).index(positive_value)
+                    p_pos = proba[0, pos_index]
+                    proba_str = f" — Probabilitas({positive_value}): **{p_pos:.3f}**"
+                except Exception:
+                    proba_str = " (probabilitas tidak tersedia)"
+
+            st.success(f"**Hasil Prediksi:** **{pred}**{proba_str}")
+
+            status_bekerja = str(inputs_form.get("BEKERJA/TIDAK", "")).upper()
+            if pred == positive_value:
+                header = "🎉 *Selamat! Anda diprediksi lulus tepat waktu.*"
+                rekomendasi = ["- Pertahankan/tambah IP tiap semester", "- Jaga nilai rata-rata tetap tinggi"]
+                if status_bekerja == "YA": rekomendasi.append("- Tetap fokus meski sambil bekerja")
+                else: rekomendasi.append("- Manfaatkan waktu luang untuk kegiatan akademik")
+                rekomendasi.extend(["- Pilih jalur yang sesuai kemampuan", "- Konsultasi rutin dengan dosen pembimbing"])
+                st.info(header + "\n" + "\n".join(rekomendasi))
+            else:
+                header = "⚠️ *Peluang lulus tepat waktu belum optimal.*"
+                # --- PERUBAHAN TEKS REKOMENDASI ---
+                rekomendasi = ["- Tingkatkan IP berikutnya", "- Upayakan nilai rata-rata naik"]
+                if status_bekerja == "YA": rekomendasi.append("- Kurangi aktivitas yang mengganggu akademik")
+                else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
+                rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
+                st.warning(header + "\n" + "\n".join(rekomendasi))
 
 with tab_chat:
-    st.subheader("4) Chatbot Akademik")
-    active_model_obj = st.session_state.get("active_model_obj", None)
+    st.subheader("4) Chatbot Akademik — Tanya Jawab & Rekomendasi")
+    active_model_obj = st.session_state.get("last_trained_model", None)
     if not active_model_obj:
-        st.error("⛔ Tidak ada model yang aktif. Chatbot tidak dapat berfungsi.")
+        st.warning("Latih model di tab 'Pelatihan & Evaluasi' atau muat file .joblib terlebih dahulu.")
     else:
-        # ... (sisa kode tab_chat lengkap)
-        pass # Placeholder
+        init_chat_state()
+        pipe = active_model_obj["pipeline"]
+        positive_value = active_model_obj["positive"]
+        
+        st.markdown("**Panduan Singkat**: " + chat_system_prompt())
+
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+        if prompt := st.chat_input("Masukkan data Anda..."):
+            st.session_state.chat_messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            st.session_state.chat_features = extract_features_from_text(prompt, st.session_state.chat_features)
+            missing = missing_features(st.session_state.chat_features)
+            
+            if not missing:
+                features_dict = st.session_state.chat_features
+                one = pd.DataFrame([features_dict])
+                pred = pipe.predict(one)[0]
+                proba_str = ""
+                if hasattr(pipe.named_steps["model"], "predict_proba"):
+                    try:
+                        proba = pipe.predict_proba(one)
+                        pos_index = list(pipe.classes_).index(positive_value)
+                        p_pos = proba[0, pos_index]
+                        proba_str = f" (Probabilitas: {p_pos:.2f})"
+                    except Exception:
+                        proba_str = ""
+                
+                status_bekerja = str(features_dict.get("BEKERJA/TIDAK", "")).upper()
+                if pred == positive_value:
+                    header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n🎉 *Selamat! Anda diprediksi lulus tepat waktu.*"
+                    rekomendasi = ["- Pertahankan/tambah IP tiap semester", "- Jaga nilai rata-rata tetap tinggi"]
+                    if status_bekerja == "YA": rekomendasi.append("- Tetap fokus meski sambil bekerja")
+                    else: rekomendasi.append("- Manfaatkan waktu luang untuk kegiatan akademik")
+                    rekomendasi.extend(["- Pilih jalur yang sesuai kemampuan", "- Konsultasi rutin dengan dosen pembimbing"])
+                    response = header + "\n" + "\n".join(rekomendasi)
+                else:
+                    header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n⚠️ *Peluang lulus tepat waktu belum optimal.*"
+                    # --- PERUBAHAN TEKS REKOMENDASI ---
+                    rekomendasi = ["- Tingkatkan IP berikutnya", "- Upayakan nilai rata-rata naik"]
+                    if status_bekerja == "YA": rekomendasi.append("- Kurangi aktivitas yang mengganggu akademik")
+                    else: rekomendasi.append("- Fokuskan energi pada kegiatan akademik")
+                    rekomendasi.extend(["- Konsultasikan strategi belajar dengan dosen", "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"])
+                    response = header + "\n" + "\n".join(rekomendasi)
+                
+                st.session_state.chat_features = {k: None for k in REQUIRED_FEATURES} # Reset
+            else:
+                ask_parts = []
+                for m in missing:
+                    if m == "USIAMASUK": ask_parts.append("USIAMASUK (angka, tahun)")
+                    elif m in {"IP2", "IP3", "IP5"}: ask_parts.append(f"{m} (0.00 - 4.00)")
+                    elif m == "rata-rata nilai": ask_parts.append("rata-rata nilai (0.00 - 16.00, dari total bobot nilai semester 5 dibagi SKS)")
+                    elif m == "mandiri/flagsip": ask_parts.append("jalur: MANDIRI / FLAGSIP")
+                    elif m == "BEKERJA/TIDAK": ask_parts.append("status kerja: YA / TIDAK")
+                response = f"Data belum lengkap. Mohon lengkapi: {', '.join(ask_parts)}"
+
+            with st.chat_message("assistant"):
+                st.markdown(response)
+            st.session_state.chat_messages.append({"role": "assistant", "content": response})
 
 with tab_about:
     st.subheader("Tentang Aplikasi (Skema Terkunci)")
     st.markdown(f"""
 - **Fitur digunakan**: {', '.join(CANON_FEATURES)}
 - **Target**: {TARGET_NAME}
+- **Catatan**: Aplikasi ini menggunakan skema fitur yang telah ditentukan untuk memprediksi kelulusan tepat waktu.
 """)
