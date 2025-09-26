@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import sklearn  # tampilkan versi di sidebar
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-# --- PERBAIKAN: Impor precision_score dan recall_score ---
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support, confusion_matrix,
     roc_auc_score, roc_curve, precision_recall_curve, classification_report,
@@ -225,26 +224,10 @@ def plot_roc_pr(y_true_bin, y_score):
     ax2.set_title("Precision-Recall Curve")
     st.pyplot(fig2)
 
-
-def get_feature_names_from_ct(ct: ColumnTransformer):
-    output_features = []
-    for name, transformer, cols in ct.transformers_:
-        if name == "remainder" and transformer == "drop":
-            continue
-        if hasattr(transformer, "named_steps"):
-            last_step = list(transformer.named_steps.values())[-1]
-            if hasattr(last_step, "get_feature_names_out"):
-                try:
-                    fn = last_step.get_feature_names_out(cols)
-                except Exception:
-                    fn = last_step.get_feature_names_out()
-                output_features.extend(fn)
-            else:
-                output_features.extend(cols if isinstance(cols, list) else [cols])
-        else:
-            output_features.extend(cols if isinstance(cols, list) else [cols])
-    return output_features
-
+# --- DIHAPUS: Fungsi ini tidak lagi diperlukan ---
+# def get_feature_names_from_ct(ct: ColumnTransformer):
+#     ...
+# --- AKHIR BAGIAN DIHAPUS ---
 
 def to_binary(y_series: pd.Series, positive_value):
     return (y_series == positive_value).astype(int)
@@ -433,14 +416,12 @@ with tab_train:
                     if use_cv:
                         st.info(f"Cross-Validation Aktif ({n_folds} folds)")
                         
-                        # --- PERBAIKAN: Definisi scorer yang benar ---
                         scoring_metrics = {
                             'accuracy': 'accuracy',
                             'precision': make_scorer(precision_score, pos_label=positive_value, average='binary', zero_division=0),
                             'recall': make_scorer(recall_score, pos_label=positive_value, average='binary', zero_division=0),
                             'f1': make_scorer(f1_score, pos_label=positive_value, average='binary', zero_division=0)
                         }
-                        # --- AKHIR PERBAIKAN ---
 
                         skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
                         
@@ -514,13 +495,17 @@ with tab_train:
                     st.markdown("**Pentingnya Fitur**")
                     try:
                         if use_cv:
+                            # Buat split sementara hanya untuk permutation importance
                             _, X_test_perm, _, y_test_perm = train_test_split(X, y, test_size=0.2, random_state=random_state, stratify=y)
                         else:
                             X_test_perm, y_test_perm = X_test, y_test
 
                         model = pipe.named_steps["model"]
                         pre = pipe.named_steps["preprocess"]
-                        feature_names = get_feature_names_from_ct(pre)
+                        
+                        # --- PERBAIKAN: Gunakan metode .get_feature_names_out() ---
+                        feature_names = pre.get_feature_names_out()
+                        
                         if hasattr(model, "feature_importances_"):
                             importances = model.feature_importances_
                         else:
@@ -530,6 +515,7 @@ with tab_train:
                                 n_repeats=5, random_state=random_state, n_jobs=-1, scoring=scorer
                             )
                             importances = result.importances_mean
+
                         imp_df = pd.DataFrame({"fitur": feature_names, "importance": importances})
                         imp_df = imp_df.sort_values("importance", ascending=False).head(20)
                         fig, ax = plt.subplots(figsize=(6, 5))
@@ -826,7 +812,8 @@ with tab_form:
                 try:
                     if hasattr(pipe.named_steps["model"], "feature_importances_"):
                         importances = pipe.named_steps["model"].feature_importances_
-                        feature_names = get_feature_names_from_ct(pipe.named_steps["preprocess"])
+                        # --- PERBAIKAN: Gunakan .get_feature_names_out() juga di sini ---
+                        feature_names = pipe.named_steps["preprocess"].get_feature_names_out()
                         sorted_idx = np.argsort(importances)[::-1]
                         st.markdown("*Fitur paling berpengaruh (global):*")
                         st.write({feature_names[i]: float(importances[i]) for i in sorted_idx[:3]})
