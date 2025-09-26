@@ -524,7 +524,6 @@ with tab_train:
 # =========================================================
 REQUIRED_FEATURES = ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai", "mandiri/flagsip", "BEKERJA/TIDAK"]
 
-# --- PERBAIKAN DIMULAI DI SINI ---
 # Pola regex toleran: IP/IPK/IPS, ada/tanpa spasi, desimal . atau ,
 FEATURE_PATTERNS = {
     "USIAMASUK": re.compile(r"(usia(\s*masuk)?|usiamasuk|umur)\s*[:=]?\s*(\d{1,2})", re.I),
@@ -564,7 +563,6 @@ def extract_features_from_text(text: str, current: dict) -> dict:
             out[f"IP{idx}"] = float(val)
         except Exception:
             pass
-# --- PERBAIKAN BERAKHIR DI SINI ---
 
     # 2) Kategori jalur
     if re.search(r"\bmandiri\b", t, re.I):
@@ -630,27 +628,41 @@ def predict_and_recommend(pipe, features_dict: dict, positive_value: str):
         p_pos = float(proba[:, pos_index][0])
         proba_str = f" (Prob positif={positive_value}: {p_pos:.3f})"
 
-    # Rekomendasi seperti di Form
+    # Rekomendasi dibuat dinamis
+    status_bekerja = str(features_dict.get("BEKERJA/TIDAK", "")).upper()
+
     if str(pred).upper() == str(positive_value).upper():
-        msg = (
-            f"Hasil prediksi: **{pred}**{proba_str}.\n\n"
-            "🎉 *Selamat! Anda diprediksi lulus tepat waktu.*\n"
-            "- Pertahankan/tambah IP tiap semester\n"
-            "- Jaga nilai rata-rata tetap tinggi\n"
-            "- Tetap fokus meski sambil bekerja\n"
-            "- Pilih jalur yang sesuai kemampuan\n"
+        header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n🎉 *Selamat! Anda diprediksi lulus tepat waktu.*"
+        rekomendasi = [
+            "- Pertahankan/tambah IP tiap semester",
+            "- Jaga nilai rata-rata tetap tinggi",
+        ]
+        if status_bekerja == "YA":
+            rekomendasi.append("- Tetap fokus meski sambil bekerja")
+        else:
+            rekomendasi.append("- Manfaatkan waktu luang untuk kegiatan positif/akademik")
+
+        rekomendasi.extend([
+            "- Pilih jalur yang sesuai kemampuan",
             "- Konsultasi rutin dengan dosen pembimbing"
-        )
+        ])
+        msg = header + "\n" + "\n".join(rekomendasi)
     else:
-        msg = (
-            f"Hasil prediksi: **{pred}**{proba_str}.\n\n"
-            "⚠️ *Saat ini peluang lulus tepat waktu belum optimal.*\n"
-            "- Tingkatkan IP (IP2, IP3, IP5) berikutnya\n"
-            "- Upayakan nilai rata-rata naik\n"
-            "- Kurangi aktivitas yang mengganggu akademik\n"
-            "- Konsultasikan strategi belajar dengan dosen\n"
+        header = f"Hasil prediksi: **{pred}**{proba_str}.\n\n⚠️ *Saat ini peluang lulus tepat waktu belum optimal.*"
+        rekomendasi = [
+            "- Tingkatkan IP (IP2, IP3, IP5) berikutnya",
+            "- Upayakan nilai rata-rata naik",
+        ]
+        if status_bekerja == "YA":
+            rekomendasi.append("- Pertimbangkan mengurangi aktivitas luar studi jika mengganggu akademik")
+        else:
+             rekomendasi.append("- Fokuskan energi pada kegiatan akademik untuk hasil maksimal")
+
+        rekomendasi.extend([
+            "- Konsultasikan strategi belajar dengan dosen",
             "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"
-        )
+        ])
+        msg = header + "\n" + "\n".join(rekomendasi)
     return msg
 
 
@@ -823,25 +835,45 @@ with tab_form:
                 st.success(f"**Hasil Prediksi (Form 7 Fitur)**: **{pred}**{proba_str}")
 
                 if str(pred).upper() == str(positive_value).upper():
+                    tips = [
+                        "- Pertahankan atau tingkatkan IP (Indeks Prestasi) tiap semester",
+                        "- Jaga nilai rata-rata tetap tinggi",
+                    ]
+                    if bekerja == "YA":
+                        tips.append("- Tetap fokus pada studi walaupun sambil bekerja")
+                    else:
+                        tips.append("- Manfaatkan waktu luang untuk kegiatan yang menunjang akademik")
+                    
+                    tips.extend([
+                        "- Pilih jalur pendidikan yang sesuai kemampuan",
+                        "- Konsultasi rutin dengan dosen pembimbing"
+                    ])
+                    
                     st.info(
                         "🎉 *Selamat! Prediksi Anda akan lulus tepat waktu.*\n\n"
-                        "Tetap pertahankan kinerja Anda. Tips agar tetap di jalur:\n"
-                        "- Pertahankan atau tingkatkan IP (Indeks Prestasi) tiap semester\n"
-                        "- Jaga nilai rata-rata tetap tinggi\n"
-                        "- Tetap fokus pada studi walaupun sambil bekerja\n"
-                        "- Pilih jalur pendidikan yang sesuai kemampuan\n"
-                        "- Konsultasi rutin dengan dosen pembimbing"
+                        "Tetap pertahankan kinerja Anda. Tips agar tetap di jalur:\n" +
+                        "\n".join(tips)
                     )
                 else:
+                    saran = [
+                        "- Tingkatkan IP di semester berikutnya (IP2, IP3, IP5)",
+                        "- Usahakan rata-rata nilai naik di semester berikutnya",
+                    ]
+                    if bekerja == "YA":
+                        saran.append("- Pertimbangkan mengurangi aktivitas luar studi jika mengganggu akademik")
+                    else:
+                        saran.append("- Alokasikan lebih banyak waktu untuk fokus pada kegiatan akademik")
+
+                    saran.extend([
+                        "- Konsultasikan strategi belajar dengan dosen pembimbing",
+                        "- Pastikan memilih jalur pendidikan yang sesuai",
+                        "Periksa kembali data input untuk memastikan akurasi."
+                    ])
+
                     st.warning(
                         "⚠️ *Prediksi: Anda belum lulus tepat waktu.*\n\n"
-                        "Beberapa hal yang dapat Anda tingkatkan agar peluang lulus tepat waktu lebih besar:\n"
-                        "- Tingkatkan IP di semester berikutnya (IP2, IP3, IP5)\n"
-                        "- Usahakan rata-rata nilai naik di semester berikutnya\n"
-                        "- Pertimbangkan mengurangi aktivitas luar studi jika mengganggu akademik\n"
-                        "- Konsultasikan strategi belajar dengan dosen pembimbing\n"
-                        "- Pastikan memilih jalur pendidikan yang sesuai\n"
-                        "Periksa kembali data input untuk memastikan akurasi."
+                        "Beberapa hal yang dapat Anda tingkatkan agar peluang lulus tepat waktu lebih besar:\n" +
+                        "\n".join(saran)
                     )
 
                 # ==== OPTIONAL: tampilkan fitur paling berpengaruh jika model mendukung ====
