@@ -1,6 +1,7 @@
 # app.py
 from io import BytesIO
 import io
+import re
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -12,7 +13,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support, confusion_matrix,
     roc_auc_score, roc_curve, precision_recall_curve, classification_report,
-    f1_score, make_scorer,  # ✅ scorer F1 kustom dengan pos_label
+    f1_score, make_scorer,
 )
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
@@ -51,7 +52,6 @@ st.sidebar.caption(f"scikit-learn version: {sklearn.__version__}")
 def _norm(s: str) -> str:
     return str(s).strip().lower().replace("_", "").replace("-", "").replace(" ", "")
 
-# Pemetaan variasi nama kolom → nama kanonik
 NAME_MAP = {
     # USIAMASUK
     "usiamasuk": "USIAMASUK",
@@ -254,7 +254,6 @@ if model_name == "Random Forest":
     params["n_estimators"] = st.sidebar.slider("n_estimators", 100, 1000, 300, 50)
     params["max_depth"] = st.sidebar.select_slider("max_depth", options=[None, 5, 10, 15, 20, 30, 50], value=None)
     params["min_samples_split"] = st.sidebar.slider("min_samples_split", 2, 20, 2, 1)
-    # st.toggle ada di Streamlit baru; fallback ke checkbox jika tidak ada
     try:
         params["balanced"] = st.sidebar.toggle("class_weight='balanced'", value=True)
     except AttributeError:
@@ -287,8 +286,9 @@ Fitur dipakai: **USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEK
 Target (label): **LULUS TEPAT/TIDAK**
 """)
 
-tab_data, tab_train, tab_form, tab_about = st.tabs(
-    ["📁 Data", "🏋️ Pelatihan & Evaluasi", "📝 Form Input (7 Fitur)", "ℹ️ Tentang"]
+# Tambah tab Chatbot (baru)
+tab_data, tab_train, tab_form, tab_chat, tab_about = st.tabs(
+    ["📁 Data", "🏋️ Pelatihan & Evaluasi", "📝 Form Input (7 Fitur)", "🤖 Chatbot", "ℹ️ Tentang"]
 )
 
 # -----------------------------
@@ -360,7 +360,6 @@ with tab_data:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         except Exception:
-            # Fallback: provide CSV jika openpyxl tidak tersedia
             csv_bytes = tpl_df.to_csv(index=False).encode("utf-8")
             st.download_button(
                 "Unduh Template CSV (sample_data_skematerkunci.csv)",
@@ -447,7 +446,6 @@ with tab_train:
                     cm = confusion_matrix(y_test, y_pred, labels=labels_for_cm[:2] if len(labels_for_cm) >= 2 else labels_for_cm)
                     st.markdown("**Confusion Matrix**")
                     try:
-                        # Sesuaikan label dengan bentuk matriks
                         plot_labels = labels_for_cm[:2] if cm.shape == (2, 2) else labels_for_cm[: cm.shape[0]]
                         plot_confusion_matrix(cm, labels=[str(l) for l in plot_labels])
                     except Exception:
@@ -468,7 +466,6 @@ with tab_train:
                         if hasattr(model, "feature_importances_"):
                             importances = model.feature_importances_
                         else:
-                            # ✅ Gunakan F1 scorer dengan pos_label=positive_value
                             scorer = make_scorer(f1_score, pos_label=positive_value, zero_division=0)
                             result = permutation_importance(
                                 pipe, X_test, y_test,
@@ -505,6 +502,212 @@ with tab_train:
                         "target": target_col,
                         "positive": positive_value
                     }
+
+# =========================================================
+# Chatbot Utilities
+# =========================================================
+REQUIRED_FEATURES = ["USIAMASUK", "IP2", "IP3", "IP5", "rata-rata nilai", "mandiri/flagsip", "BEKERJA/TIDAK"]
+
+FEATURE_PATTERNS = {
+    "USIAMASUK": re.compile(r"(usia(\\s*masuk)?|usiamasuk|umur)\\s*[:=]?\\s*(\\d{1,2})", re.I),
+    "IP2": re.compile(r"ip2\\s*[:=]?\\s*([0-?)", re.I),
+    "IP3": re.compile(r"ip3\\s*[:=]?\\s*([0-4](?:\\.\\d{1,  "IP5": re.compile(r"ip5\\s*[:=]?\\s*([0-4](?:re.I),
+    "rata-rata nilai": re.compile(r"(rata[- ]?rata\\s*nilai|nilai\\s*rata[- ]?rata|rerata)\\s*[:=]?\\s*(\\d{1,3})", re.I),
+}
+
+def extract_features_from_text(text: str, current: dict) -> dict:
+    t = text.strip()
+    out = dict(current)
+
+    # Angka-angka via regex
+    for key, pat in FEATURE_PATTERNS.items():
+        m = pat.search(t)
+        if m:
+            val = m.group(m.lastindex) if m.lastindex else m.group(1)
+            if key == "rata-rata nilai" or key == "USIAMASUK":
+                try:
+                    out[key] = int(val)
+                except Exception:
+                    pass
+            else:
+                try:
+                    out[key] = float(val)
+                except Exception:
+                    pass
+
+    # Kategori jalur: mandiri / flagsip/flagship
+    if re.search(r"\bmandiri\b", t, re.I):
+        out["mandiri/flagsip"] = "MANDIRI"
+    if re.search(r"\bflag(ship|sip)\b", t, re.I):
+        out["mandiri/flagsip"] = "FLAGSIP"
+
+    # Bekerja: YA/TIDAK
+    if re.search(r"\b(bekerja|kerja)\b", t, re.I):
+        out["BEKERJA/TIDAK"] = "YA"
+    if re.search(r"\b(tidak\s*(bekerja|kerja)|nggak\s*kerja|gak\s*kerja|tidak)\b", t, re.I):
+        out["BEKERJA/TIDAK"] = "TIDAK"
+
+    # Assignment gaya 'fitur=nilai'
+    assign_pairs = re.findall(r"([a-zA-Z/\- ]+)\s*=\s*([\w\.]+)", t)
+    for k_raw, v_raw in assign_pairs:
+        k = _norm(k_raw)
+        if k in NAME_MAP:
+            canon = NAME_MAP[k]
+            if canon in {"mandiri/flagsip", "BEKERJA/TIDAK"}:
+                if _norm(v_raw) in {"mandiri"}:
+                    out[canon] = "MANDIRI"
+                elif _norm(v_raw) in {"flagsip", "flagship"}:
+                    out[canon] = "FLAGSIP"
+                elif _norm(v_raw) in {"ya", "true", "1"}:
+                    out[canon] = "YA"
+                elif _norm(v_raw) in {"tidak", "false", "0"}:
+                    out[canon] = "TIDAK"
+            else:
+                try:
+                    out[canon] = float(v_raw) if canon != "USIAMASUK" and canon != "rata-rata nilai" else int(v_raw)
+                except Exception:
+                    pass
+    return out
+
+
+def missing_features(feat: dict):
+    return [f for f in REQUIRED_FEATURES if feat.get(f) in (None, "", np.nan)]
+
+
+def predict_and_recommend(pipe, features_dict: dict, positive_value: str):
+    # Buat DataFrame satu baris, harmonisasi
+    one = pd.DataFrame([{k: features_dict.get(k, np.nan) for k in REQUIRED_FEATURES}])
+    one = harmonize_columns(one)
+    pred = pipe.predict(one)[0]
+    proba_str = ""
+    if hasattr(pipe.named_steps["model"], "predict_proba"):
+        proba = pipe.predict_proba(one)
+        classes = pipe.named_steps["model"].classes_
+        pos_index = list(classes).index(positive_value) if positive_value in classes else (1 if proba.shape[1] > 1 else 0)
+        p_pos = float(proba[:, pos_index][0])
+        proba_str = f" (Prob positif={positive_value}: {p_pos:.3f})"
+
+    # Rekomendasi seperti di Form
+    if str(pred).upper() == str(positive_value).upper():
+        msg = (
+            f"Hasil prediksi: **{pred}**{proba_str}.\n\n"
+            "🎉 *Selamat! Anda diprediksi lulus tepat waktu.*\n"
+            "- Pertahankan/tambah IP tiap semester\n"
+            "- Jaga nilai rata-rata tetap tinggi\n"
+            "- Tetap fokus meski sambil bekerja\n"
+            "- Pilih jalur yang sesuai kemampuan\n"
+            "- Konsultasi rutin dengan dosen pembimbing"
+        )
+    else:
+        msg = (
+            f"Hasil prediksi: **{pred}**{proba_str}.\n\n"
+            "⚠️ *Saat ini peluang lulus tepat waktu belum optimal.*\n"
+            "- Tingkatkan IP (IP2, IP3, IP5) berikutnya\n"
+            "- Upayakan nilai rata-rata naik\n"
+            "- Kurangi aktivitas yang mengganggu akademik\n"
+            "- Konsultasikan strategi belajar dengan dosen\n"
+            "- Pastikan jalur (MANDIRI/FLAGSIP) sesuai"
+        )
+    return msg
+
+
+def init_chat_state():
+    if "chat_messages" not in st.session_state:
+        st.session_state["chat_messages"] = []  # list of {role: 'user'|'assistant', 'content': str}
+    if "chat_features" not in st.session_state:
+        st.session_state["chat_features"] = {k: None for k in REQUIRED_FEATURES}
+
+
+def chat_system_prompt():
+    return (
+        "Saya adalah asisten akademik. Berbicaralah santai. "
+        "Saya dapat membantu prediksi kelulusan tepat waktu menggunakan 7 fitur: "
+        "USIAMASUK, IP2, IP3, IP5, rata-rata nilai, mandiri/flagsip, BEKERJA/TIDAK. "
+        "Ketik data Anda, misalnya: `usia=19 ip2=3.2 ip3=3.1 ip5=3.4 rerata=82 jalur=mandiri bekerja=tidak`. "
+        "Saya akan menanyakan yang belum lengkap. Ketik `reset` untuk mulai ulang."
+    )
+
+# -----------------------------
+# Tab Chatbot (baru)
+# -----------------------------
+with tab_chat:
+    st.subheader("4) Chatbot Akademik — Tanya Jawab & Rekomendasi")
+    active_model_obj = st.session_state.get("last_trained_model", None)
+    if uploaded_model is not None:
+        try:
+            active_model_obj = joblib.load(uploaded_model)
+            st.success("Model dari file berhasil dimuat (aktif untuk Chatbot).")
+        except Exception as e:
+            st.error(f"Gagal memuat model: {e}")
+
+    if active_model_obj is None:
+        st.warning("Belum ada model aktif. Latih model di tab **Pelatihan & Evaluasi** atau muat .joblib dari sidebar.")
+    else:
+        init_chat_state()
+        pipe = active_model_obj["pipeline"]
+        positive_value = active_model_obj["positive"]
+
+        # Render riwayat chat
+        with st.container(border=True):
+            st.markdown("**Panduan Singkat**: " + chat_system_prompt())
+        for msg in st.session_state["chat_messages"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # Input pengguna
+        user_text = st.chat_input("Tulis pertanyaan atau masukkan data Anda...")
+        if user_text:
+            st.session_state["chat_messages"].append({"role": "user", "content": user_text})
+
+            # Proses perintah
+            user_low = user_text.strip().lower()
+            if user_low in {"reset", "/reset", "ulang", "mulai ulang"}:
+                st.session_state["chat_features"] = {k: None for k in REQUIRED_FEATURES}
+                bot_reply = "State direset. Silakan kirim 7 fitur Anda atau jawab pertanyaan saya."
+                st.session_state["chat_messages"].append({"role": "assistant", "content": bot_reply})
+                st.rerun()
+
+            # Ekstrak fitur dari teks
+            feats = extract_features_from_text(user_text, st.session_state["chat_features"])
+            st.session_state["chat_features"] = feats
+
+            # Cek kekurangan
+            miss = missing_features(feats)
+            if miss:
+                # Tanyakan yang belum
+                ask_parts = []
+                for m in miss:
+                    if m == "USIAMASUK":
+                        ask_parts.append("USIAMASUK (angka, tahun)")
+                    elif m in {"IP2", "IP3", "IP5"}:
+                        ask_parts.append(f"{m} (0.00 - 4.00)")
+                    elif m == "rata-rata nilai":
+                        ask_parts.append("rata-rata nilai (0-100)")
+                    elif m == "mandiri/flagsip":
+                        ask_parts.append("jalur: MANDIRI / FLAGSIP")
+                    elif m == "BEKERJA/TIDAK":
+                        ask_parts.append("status kerja: YA / TIDAK")
+                bot_reply = (
+                    "Data belum lengkap. Mohon lengkapi: " + ", ".join(ask_parts) + "\n\n"
+                    "Contoh cepat: `usia=19 ip2=3.2 ip3=3.1 ip5=3.4 rerata=82 jalur=mandiri bekerja=tidak`"
+                )
+            else:
+                # Semua fitur lengkap → prediksi
+                try:
+                    bot_reply = predict_and_recommend(pipe, feats, positive_value)
+                except Exception as e:
+                    bot_reply = f"Maaf, terjadi kesalahan saat memprediksi: {e}"
+
+            st.session_state["chat_messages"].append({"role": "assistant", "content": bot_reply})
+            st.rerun()
+
+        # Sidebar kecil status fitur
+        with st.expander("Status Fitur yang Terdeteksi"):
+            st.write(st.session_state["chat_features"])
+            if missing_features(st.session_state["chat_features"]):
+                st.info("Lengkapi fitur yang masih kosong melalui chat.")
+            else:
+                st.success("Semua fitur terpenuhi. Anda bisa ketik pertanyaan lain atau `reset`.")
 
 # -----------------------------
 # Tab Form Input (7 Fitur)
