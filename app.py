@@ -171,7 +171,7 @@ def build_pipeline(model_name: str, numeric_features, categorical_features, para
         remainder="drop"
     )
 
-    if model_name == "Naive Bayes (GaussianNB)":
+    if model_name == "Naive Bayes":
         model = GaussianNB(var_smoothing=params.get("var_smoothing", 1e-9))
     elif model_name == "Decision Tree":
         model = DecisionTreeClassifier(
@@ -254,7 +254,7 @@ def to_binary(y_series: pd.Series, positive_value):
 st.sidebar.title("⚙️ Pengaturan")
 st.sidebar.caption("Model & parameter pelatihan")
 model_name = st.sidebar.selectbox(
-    "Pilih Model", ["Random Forest", "Decision Tree", "Naive Bayes (GaussianNB)"], index=0
+    "Pilih Model", ["Random Forest", "Decision Tree", "Naive Bayes"], index=0
 )
 test_size = st.sidebar.slider("Porsi Test Set", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
 random_state = st.sidebar.number_input("Random State", value=42, step=1)
@@ -274,7 +274,7 @@ elif model_name == "Decision Tree":
         params["balanced"] = st.sidebar.toggle("class_weight='balanced'", value=True)
     except AttributeError:
         params["balanced"] = st.sidebar.checkbox("class_weight='balanced'", value=True)
-elif model_name == "Naive Bayes (GaussianNB)":
+elif model_name == "Naive Bayes":
     params["var_smoothing"] = 10 ** st.sidebar.slider("log10(var_smoothing)", -12, -6, -9)
 
 st.sidebar.divider()
